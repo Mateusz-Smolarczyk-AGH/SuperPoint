@@ -1,0 +1,288 @@
+Warstwa: descriptor.0.bn.bias
+Typ danych: torch.float32
+Shape: [256]
+
+Warstwa: descriptor.0.bn.weight
+Typ danych: torch.float32
+Shape: [256]
+
+Warstwa: descriptor.0.bn.running_mean
+Typ danych: torch.float32
+Shape: [256]
+
+Warstwa: descriptor.0.bn.running_var
+Typ danych: torch.float32
+Shape: [256]
+
+Warstwa: descriptor.0.conv.bias
+Typ danych: torch.float32
+Shape: [256]
+
+Warstwa: descriptor.0.conv.weight
+Typ danych: torch.float32
+Shape: [256, 128, 3, 3]
+
+Warstwa: descriptor.1.bn.bias
+Typ danych: torch.float32
+Shape: [256]
+
+Warstwa: descriptor.1.bn.weight
+Typ danych: torch.float32
+Shape: [256]
+
+Warstwa: descriptor.1.bn.running_mean
+Typ danych: torch.float32
+Shape: [256]
+
+Warstwa: descriptor.1.bn.running_var
+Typ danych: torch.float32
+Shape: [256]
+
+Warstwa: descriptor.1.conv.bias
+Typ danych: torch.float32
+Shape: [256]
+
+Warstwa: descriptor.1.conv.weight
+Typ danych: torch.float32
+Shape: [256, 256, 1, 1]
+
+Warstwa: detector.0.bn.bias
+Typ danych: torch.float32
+Shape: [256]
+
+Warstwa: detector.0.bn.weight
+Typ danych: torch.float32
+Shape: [256]
+
+Warstwa: detector.0.bn.running_mean
+Typ danych: torch.float32
+Shape: [256]
+
+Warstwa: detector.0.bn.running_var
+Typ danych: torch.float32
+Shape: [256]
+
+Warstwa: detector.0.conv.bias
+Typ danych: torch.float32
+Shape: [256]
+
+Warstwa: detector.0.conv.weight
+Typ danych: torch.float32
+Shape: [256, 128, 3, 3]
+
+Warstwa: detector.1.bn.bias
+Typ danych: torch.float32
+Shape: [65]
+
+Warstwa: detector.1.bn.weight
+Typ danych: torch.float32
+Shape: [65]
+
+Warstwa: detector.1.bn.running_mean
+Typ danych: torch.float32
+Shape: [65]
+
+Warstwa: detector.1.bn.running_var
+Typ danych: torch.float32
+Shape: [65]
+
+Warstwa: detector.1.conv.bias
+Typ danych: torch.float32
+Shape: [65]
+
+Warstwa: detector.1.conv.weight
+Typ danych: torch.float32
+Shape: [65, 256, 1, 1]
+
+Warstwa: backbone.0.0.bn.bias
+Typ danych: torch.float32
+Shape: [64]
+
+Warstwa: backbone.0.0.bn.weight
+Typ danych: torch.float32
+Shape: [64]
+
+Warstwa: backbone.0.0.bn.running_mean
+Typ danych: torch.float32
+Shape: [64]
+
+Warstwa: backbone.0.0.bn.running_var
+Typ danych: torch.float32
+Shape: [64]
+
+Warstwa: backbone.0.0.conv.bias
+Typ danych: torch.float32
+Shape: [64]
+
+Warstwa: backbone.0.0.conv.weight
+Typ danych: torch.float32
+Shape: [64, 1, 3, 3]
+
+Warstwa: backbone.0.1.bn.bias
+Typ danych: torch.float32
+Shape: [64]
+
+Warstwa: backbone.0.1.bn.weight
+Typ danych: torch.float32
+Shape: [64]
+
+Warstwa: backbone.0.1.bn.running_mean
+Typ danych: torch.float32
+Shape: [64]
+
+Warstwa: backbone.0.1.bn.running_var
+Typ danych: torch.float32
+Shape: [64]
+
+Warstwa: backbone.0.1.conv.bias
+Typ danych: torch.float32
+Shape: [64]
+
+Warstwa: backbone.0.1.conv.weight
+Typ danych: torch.float32
+Shape: [64, 64, 3, 3]
+
+Warstwa: backbone.1.0.bn.bias
+Typ danych: torch.float32
+Shape: [64]
+
+Warstwa: backbone.1.0.bn.weight
+Typ danych: torch.float32
+Shape: [64]
+
+Warstwa: backbone.1.0.bn.running_mean
+Typ danych: torch.float32
+Shape: [64]
+
+Warstwa: backbone.1.0.bn.running_var
+Typ danych: torch.float32
+Shape: [64]
+
+Warstwa: backbone.1.0.conv.bias
+Typ danych: torch.float32
+Shape: [64]
+
+Warstwa: backbone.1.0.conv.weight
+Typ danych: torch.float32
+Shape: [64, 64, 3, 3]
+
+Warstwa: backbone.1.1.bn.bias
+Typ danych: torch.float32
+Shape: [64]
+
+Warstwa: backbone.1.1.bn.weight
+Typ danych: torch.float32
+Shape: [64]
+
+Warstwa: backbone.1.1.bn.running_mean
+Typ danych: torch.float32
+Shape: [64]
+
+Warstwa: backbone.1.1.bn.running_var
+Typ danych: torch.float32
+Shape: [64]
+
+Warstwa: backbone.1.1.conv.bias
+Typ danych: torch.float32
+Shape: [64]
+
+Warstwa: backbone.1.1.conv.weight
+Typ danych: torch.float32
+Shape: [64, 64, 3, 3]
+
+Warstwa: backbone.2.0.bn.bias
+Typ danych: torch.float32
+Shape: [128]
+
+Warstwa: backbone.2.0.bn.weight
+Typ danych: torch.float32
+Shape: [128]
+
+Warstwa: backbone.2.0.bn.running_mean
+Typ danych: torch.float32
+Shape: [128]
+
+Warstwa: backbone.2.0.bn.running_var
+Typ danych: torch.float32
+Shape: [128]
+
+Warstwa: backbone.2.0.conv.bias
+Typ danych: torch.float32
+Shape: [128]
+
+Warstwa: backbone.2.0.conv.weight
+Typ danych: torch.float32
+Shape: [128, 64, 3, 3]
+
+Warstwa: backbone.2.1.bn.bias
+Typ danych: torch.float32
+Shape: [128]
+
+Warstwa: backbone.2.1.bn.weight
+Typ danych: torch.float32
+Shape: [128]
+
+Warstwa: backbone.2.1.bn.running_mean
+Typ danych: torch.float32
+Shape: [128]
+
+Warstwa: backbone.2.1.bn.running_var
+Typ danych: torch.float32
+Shape: [128]
+
+Warstwa: backbone.2.1.conv.bias
+Typ danych: torch.float32
+Shape: [128]
+
+Warstwa: backbone.2.1.conv.weight
+Typ danych: torch.float32
+Shape: [128, 128, 3, 3]
+
+Warstwa: backbone.3.0.bn.bias
+Typ danych: torch.float32
+Shape: [128]
+
+Warstwa: backbone.3.0.bn.weight
+Typ danych: torch.float32
+Shape: [128]
+
+Warstwa: backbone.3.0.bn.running_mean
+Typ danych: torch.float32
+Shape: [128]
+
+Warstwa: backbone.3.0.bn.running_var
+Typ danych: torch.float32
+Shape: [128]
+
+Warstwa: backbone.3.0.conv.bias
+Typ danych: torch.float32
+Shape: [128]
+
+Warstwa: backbone.3.0.conv.weight
+Typ danych: torch.float32
+Shape: [128, 128, 3, 3]
+
+Warstwa: backbone.3.1.bn.bias
+Typ danych: torch.float32
+Shape: [128]
+
+Warstwa: backbone.3.1.bn.weight
+Typ danych: torch.float32
+Shape: [128]
+
+Warstwa: backbone.3.1.bn.running_mean
+Typ danych: torch.float32
+Shape: [128]
+
+Warstwa: backbone.3.1.bn.running_var
+Typ danych: torch.float32
+Shape: [128]
+
+Warstwa: backbone.3.1.conv.bias
+Typ danych: torch.float32
+Shape: [128]
+
+Warstwa: backbone.3.1.conv.weight
+Typ danych: torch.float32
+Shape: [128, 128, 3, 3]
+
