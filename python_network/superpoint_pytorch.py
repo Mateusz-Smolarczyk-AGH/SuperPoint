@@ -168,3 +168,60 @@ class SuperPoint(nn.Module):
             "keypoint_scores": scores,
             "descriptors": descriptors,
         }
+
+
+class SuperPoint_short(nn.Module):
+    default_conf = {
+        "nms_radius": 4,
+        "max_num_keypoints": 500,
+        "detection_threshold": 0.005,
+        "remove_borders": 4,
+        "descriptor_dim": 256,
+        "channels": [64, 64, 128, 128, 256],
+    }
+
+    def __init__(self, **conf):
+        super().__init__()
+        conf = {**self.default_conf, **conf}
+        self.conf = SimpleNamespace(**conf)
+        self.stride = 2 ** (len(self.conf.channels) - 2)
+        channels = [1, *self.conf.channels[:-1]]
+
+        backbone = []
+        for i, c in enumerate(channels[1:], 1):
+            layers = [VGGBlock(channels[i - 1], c, 3), VGGBlock(c, c, 3)]
+            if i < len(channels) - 1:
+                layers.append(nn.MaxPool2d(kernel_size=2, stride=2))
+            backbone.append(nn.Sequential(*layers))
+        self.backbone = nn.Sequential(*backbone)
+
+        c = self.conf.channels[-1]
+        self.detector = nn.Sequential(
+            VGGBlock(channels[-1], c, 3),
+            VGGBlock(c, self.stride**2 + 1, 1, relu=False),
+        )
+        self.descriptor = nn.Sequential(
+            VGGBlock(channels[-1], c, 3),
+            VGGBlock(c, self.conf.descriptor_dim, 1, relu=False),
+        )
+
+    def forward(self, data):
+        image = data
+
+        features = self.backbone(image)
+        descriptors_dense = torch.nn.functional.normalize(
+            self.descriptor(features), p=2, dim=1
+        )
+
+        # Decode the detection scores
+        scores = self.detector(features)
+
+        scores = torch.nn.functional.softmax(scores, 1)[:, :-1]
+
+        b, _, h, w = scores.shape
+        scores = scores.permute(0, 2, 3, 1).reshape(b, h, w, self.stride, self.stride)
+        scores = scores.permute(0, 1, 3, 2, 4).reshape(
+            b, h * self.stride, w * self.stride
+        )
+        return scores, descriptors_dense
+        
