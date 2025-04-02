@@ -1,2 +1,4 @@
 __pycache__/**
 weights/binary_weights/**
+data/rgbd_dataset_freiburg1_xyz/**
+data/matched/**

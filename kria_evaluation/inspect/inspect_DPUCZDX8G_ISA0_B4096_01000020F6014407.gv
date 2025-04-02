@@ -1,0 +1,181 @@
+digraph SuperPoint_short {
+	input_0 [label="type:input
+name:SuperPoint_short::input_0
+assigned device:dpu
+out shape:[(1, 200, 300, 1)]" color=blue]
+	"SuperPoint_short/Sequential[backbone]/Sequential[0]/VGGBlock[0]/Conv2d[conv]/input.3" [label="type:conv2d
+name:SuperPoint_short::SuperPoint_short/Sequential[backbone]/Sequential[0]/VGGBlock[0]/Conv2d[conv]/input.3
+assigned device:dpu
+out shape:[(1, 200, 300, 64)]" color=blue]
+	"SuperPoint_short/Sequential[backbone]/Sequential[0]/VGGBlock[0]/ReLU[activation]/input.5" [label="type:relu
+name:SuperPoint_short::SuperPoint_short/Sequential[backbone]/Sequential[0]/VGGBlock[0]/ReLU[activation]/input.5
+assigned device:dpu
+out shape:[(1, 200, 300, 64)]" color=blue]
+	"SuperPoint_short/Sequential[backbone]/Sequential[0]/VGGBlock[0]/BatchNorm2d[bn]/input.7" [label="type:batch_norm
+name:SuperPoint_short::SuperPoint_short/Sequential[backbone]/Sequential[0]/VGGBlock[0]/BatchNorm2d[bn]/input.7
+assigned device:dpu
+out shape:[(1, 200, 300, 64)]" color=blue]
+	"SuperPoint_short/Sequential[backbone]/Sequential[0]/VGGBlock[1]/Conv2d[conv]/input.9" [label="type:conv2d
+name:SuperPoint_short::SuperPoint_short/Sequential[backbone]/Sequential[0]/VGGBlock[1]/Conv2d[conv]/input.9
+assigned device:dpu
+out shape:[(1, 200, 300, 64)]" color=blue]
+	"SuperPoint_short/Sequential[backbone]/Sequential[0]/VGGBlock[1]/ReLU[activation]/input.11" [label="type:relu
+name:SuperPoint_short::SuperPoint_short/Sequential[backbone]/Sequential[0]/VGGBlock[1]/ReLU[activation]/input.11
+assigned device:dpu
+out shape:[(1, 200, 300, 64)]" color=blue]
+	"SuperPoint_short/Sequential[backbone]/Sequential[0]/VGGBlock[1]/BatchNorm2d[bn]/1947" [label="type:batch_norm
+name:SuperPoint_short::SuperPoint_short/Sequential[backbone]/Sequential[0]/VGGBlock[1]/BatchNorm2d[bn]/1947
+assigned device:dpu
+out shape:[(1, 200, 300, 64)]" color=blue]
+	"SuperPoint_short/Sequential[backbone]/Sequential[0]/MaxPool2d[2]/input.13" [label="type:maxpool
+name:SuperPoint_short::SuperPoint_short/Sequential[backbone]/Sequential[0]/MaxPool2d[2]/input.13
+assigned device:dpu
+out shape:[(1, 100, 150, 64)]" color=blue]
+	"SuperPoint_short/Sequential[backbone]/Sequential[1]/VGGBlock[0]/Conv2d[conv]/input.15" [label="type:conv2d
+name:SuperPoint_short::SuperPoint_short/Sequential[backbone]/Sequential[1]/VGGBlock[0]/Conv2d[conv]/input.15
+assigned device:dpu
+out shape:[(1, 100, 150, 64)]" color=blue]
+	"SuperPoint_short/Sequential[backbone]/Sequential[1]/VGGBlock[0]/ReLU[activation]/input.17" [label="type:relu
+name:SuperPoint_short::SuperPoint_short/Sequential[backbone]/Sequential[1]/VGGBlock[0]/ReLU[activation]/input.17
+assigned device:dpu
+out shape:[(1, 100, 150, 64)]" color=blue]
+	"SuperPoint_short/Sequential[backbone]/Sequential[1]/VGGBlock[0]/BatchNorm2d[bn]/input.19" [label="type:batch_norm
+name:SuperPoint_short::SuperPoint_short/Sequential[backbone]/Sequential[1]/VGGBlock[0]/BatchNorm2d[bn]/input.19
+assigned device:dpu
+out shape:[(1, 100, 150, 64)]" color=blue]
+	"SuperPoint_short/Sequential[backbone]/Sequential[1]/VGGBlock[1]/Conv2d[conv]/input.21" [label="type:conv2d
+name:SuperPoint_short::SuperPoint_short/Sequential[backbone]/Sequential[1]/VGGBlock[1]/Conv2d[conv]/input.21
+assigned device:dpu
+out shape:[(1, 100, 150, 64)]" color=blue]
+	"SuperPoint_short/Sequential[backbone]/Sequential[1]/VGGBlock[1]/ReLU[activation]/input.23" [label="type:relu
+name:SuperPoint_short::SuperPoint_short/Sequential[backbone]/Sequential[1]/VGGBlock[1]/ReLU[activation]/input.23
+assigned device:dpu
+out shape:[(1, 100, 150, 64)]" color=blue]
+	"SuperPoint_short/Sequential[backbone]/Sequential[1]/VGGBlock[1]/BatchNorm2d[bn]/2011" [label="type:batch_norm
+name:SuperPoint_short::SuperPoint_short/Sequential[backbone]/Sequential[1]/VGGBlock[1]/BatchNorm2d[bn]/2011
+assigned device:dpu
+out shape:[(1, 100, 150, 64)]" color=blue]
+	"SuperPoint_short/Sequential[backbone]/Sequential[1]/MaxPool2d[2]/input.25" [label="type:maxpool
+name:SuperPoint_short::SuperPoint_short/Sequential[backbone]/Sequential[1]/MaxPool2d[2]/input.25
+assigned device:dpu
+out shape:[(1, 50, 75, 64)]" color=blue]
+	"SuperPoint_short/Sequential[backbone]/Sequential[2]/VGGBlock[0]/Conv2d[conv]/input.27" [label="type:conv2d
+name:SuperPoint_short::SuperPoint_short/Sequential[backbone]/Sequential[2]/VGGBlock[0]/Conv2d[conv]/input.27
+assigned device:dpu
+out shape:[(1, 50, 75, 128)]" color=blue]
+	"SuperPoint_short/Sequential[backbone]/Sequential[2]/VGGBlock[0]/ReLU[activation]/input.29" [label="type:relu
+name:SuperPoint_short::SuperPoint_short/Sequential[backbone]/Sequential[2]/VGGBlock[0]/ReLU[activation]/input.29
+assigned device:dpu
+out shape:[(1, 50, 75, 128)]" color=blue]
+	"SuperPoint_short/Sequential[backbone]/Sequential[2]/VGGBlock[0]/BatchNorm2d[bn]/input.31" [label="type:batch_norm
+name:SuperPoint_short::SuperPoint_short/Sequential[backbone]/Sequential[2]/VGGBlock[0]/BatchNorm2d[bn]/input.31
+assigned device:dpu
+out shape:[(1, 50, 75, 128)]" color=blue]
+	"SuperPoint_short/Sequential[backbone]/Sequential[2]/VGGBlock[1]/Conv2d[conv]/input.33" [label="type:conv2d
+name:SuperPoint_short::SuperPoint_short/Sequential[backbone]/Sequential[2]/VGGBlock[1]/Conv2d[conv]/input.33
+assigned device:dpu
+out shape:[(1, 50, 75, 128)]" color=blue]
+	"SuperPoint_short/Sequential[backbone]/Sequential[2]/VGGBlock[1]/ReLU[activation]/input.35" [label="type:relu
+name:SuperPoint_short::SuperPoint_short/Sequential[backbone]/Sequential[2]/VGGBlock[1]/ReLU[activation]/input.35
+assigned device:dpu
+out shape:[(1, 50, 75, 128)]" color=blue]
+	"SuperPoint_short/Sequential[backbone]/Sequential[2]/VGGBlock[1]/BatchNorm2d[bn]/2075" [label="type:batch_norm
+name:SuperPoint_short::SuperPoint_short/Sequential[backbone]/Sequential[2]/VGGBlock[1]/BatchNorm2d[bn]/2075
+assigned device:dpu
+out shape:[(1, 50, 75, 128)]" color=blue]
+	"SuperPoint_short/Sequential[backbone]/Sequential[2]/MaxPool2d[2]/input.37" [label="type:maxpool
+name:SuperPoint_short::SuperPoint_short/Sequential[backbone]/Sequential[2]/MaxPool2d[2]/input.37
+assigned device:dpu
+out shape:[(1, 25, 37, 128)]" color=blue]
+	"SuperPoint_short/Sequential[backbone]/Sequential[3]/VGGBlock[0]/Conv2d[conv]/input.39" [label="type:conv2d
+name:SuperPoint_short::SuperPoint_short/Sequential[backbone]/Sequential[3]/VGGBlock[0]/Conv2d[conv]/input.39
+assigned device:dpu
+out shape:[(1, 25, 37, 128)]" color=blue]
+	"SuperPoint_short/Sequential[backbone]/Sequential[3]/VGGBlock[0]/ReLU[activation]/input.41" [label="type:relu
+name:SuperPoint_short::SuperPoint_short/Sequential[backbone]/Sequential[3]/VGGBlock[0]/ReLU[activation]/input.41
+assigned device:dpu
+out shape:[(1, 25, 37, 128)]" color=blue]
+	"SuperPoint_short/Sequential[backbone]/Sequential[3]/VGGBlock[0]/BatchNorm2d[bn]/input.43" [label="type:batch_norm
+name:SuperPoint_short::SuperPoint_short/Sequential[backbone]/Sequential[3]/VGGBlock[0]/BatchNorm2d[bn]/input.43
+assigned device:dpu
+out shape:[(1, 25, 37, 128)]" color=blue]
+	"SuperPoint_short/Sequential[backbone]/Sequential[3]/VGGBlock[1]/Conv2d[conv]/input.45" [label="type:conv2d
+name:SuperPoint_short::SuperPoint_short/Sequential[backbone]/Sequential[3]/VGGBlock[1]/Conv2d[conv]/input.45
+assigned device:dpu
+out shape:[(1, 25, 37, 128)]" color=blue]
+	"SuperPoint_short/Sequential[backbone]/Sequential[3]/VGGBlock[1]/ReLU[activation]/input.47" [label="type:relu
+name:SuperPoint_short::SuperPoint_short/Sequential[backbone]/Sequential[3]/VGGBlock[1]/ReLU[activation]/input.47
+assigned device:dpu
+out shape:[(1, 25, 37, 128)]" color=blue]
+	"SuperPoint_short/Sequential[backbone]/Sequential[3]/VGGBlock[1]/BatchNorm2d[bn]/input.49" [label="type:batch_norm
+name:SuperPoint_short::SuperPoint_short/Sequential[backbone]/Sequential[3]/VGGBlock[1]/BatchNorm2d[bn]/input.49
+assigned device:dpu
+out shape:[(1, 25, 37, 128)]" color=blue]
+	"SuperPoint_short/Sequential[descriptor]/VGGBlock[0]/Conv2d[conv]/input.51" [label="type:conv2d
+name:SuperPoint_short::SuperPoint_short/Sequential[descriptor]/VGGBlock[0]/Conv2d[conv]/input.51
+assigned device:dpu
+out shape:[(1, 25, 37, 256)]" color=blue]
+	"SuperPoint_short/Sequential[descriptor]/VGGBlock[0]/ReLU[activation]/input.53" [label="type:relu
+name:SuperPoint_short::SuperPoint_short/Sequential[descriptor]/VGGBlock[0]/ReLU[activation]/input.53
+assigned device:dpu
+out shape:[(1, 25, 37, 256)]" color=blue]
+	"SuperPoint_short/Sequential[descriptor]/VGGBlock[0]/BatchNorm2d[bn]/input.55" [label="type:batch_norm
+name:SuperPoint_short::SuperPoint_short/Sequential[descriptor]/VGGBlock[0]/BatchNorm2d[bn]/input.55
+assigned device:dpu
+out shape:[(1, 25, 37, 256)]" color=blue]
+	"SuperPoint_short/Sequential[descriptor]/VGGBlock[1]/Conv2d[conv]/input.57" [label="type:conv2d
+name:SuperPoint_short::SuperPoint_short/Sequential[descriptor]/VGGBlock[1]/Conv2d[conv]/input.57
+assigned device:dpu
+out shape:[(1, 25, 37, 256)]" color=blue]
+	"SuperPoint_short/Sequential[detector]/VGGBlock[0]/Conv2d[conv]/input.59" [label="type:conv2d
+name:SuperPoint_short::SuperPoint_short/Sequential[detector]/VGGBlock[0]/Conv2d[conv]/input.59
+assigned device:dpu
+out shape:[(1, 25, 37, 256)]" color=blue]
+	"SuperPoint_short/Sequential[detector]/VGGBlock[0]/ReLU[activation]/input.61" [label="type:relu
+name:SuperPoint_short::SuperPoint_short/Sequential[detector]/VGGBlock[0]/ReLU[activation]/input.61
+assigned device:dpu
+out shape:[(1, 25, 37, 256)]" color=blue]
+	"SuperPoint_short/Sequential[detector]/VGGBlock[0]/BatchNorm2d[bn]/input.63" [label="type:batch_norm
+name:SuperPoint_short::SuperPoint_short/Sequential[detector]/VGGBlock[0]/BatchNorm2d[bn]/input.63
+assigned device:dpu
+out shape:[(1, 25, 37, 256)]" color=blue]
+	"SuperPoint_short/Sequential[detector]/VGGBlock[1]/Conv2d[conv]/input" [label="type:conv2d
+name:SuperPoint_short::SuperPoint_short/Sequential[detector]/VGGBlock[1]/Conv2d[conv]/input
+assigned device:dpu
+out shape:[(1, 25, 37, 65)]" color=blue]
+	input_0 -> "SuperPoint_short/Sequential[backbone]/Sequential[0]/VGGBlock[0]/Conv2d[conv]/input.3"
+	"SuperPoint_short/Sequential[backbone]/Sequential[0]/VGGBlock[0]/Conv2d[conv]/input.3" -> "SuperPoint_short/Sequential[backbone]/Sequential[0]/VGGBlock[0]/ReLU[activation]/input.5"
+	"SuperPoint_short/Sequential[backbone]/Sequential[0]/VGGBlock[0]/ReLU[activation]/input.5" -> "SuperPoint_short/Sequential[backbone]/Sequential[0]/VGGBlock[0]/BatchNorm2d[bn]/input.7"
+	"SuperPoint_short/Sequential[backbone]/Sequential[0]/VGGBlock[0]/BatchNorm2d[bn]/input.7" -> "SuperPoint_short/Sequential[backbone]/Sequential[0]/VGGBlock[1]/Conv2d[conv]/input.9"
+	"SuperPoint_short/Sequential[backbone]/Sequential[0]/VGGBlock[1]/Conv2d[conv]/input.9" -> "SuperPoint_short/Sequential[backbone]/Sequential[0]/VGGBlock[1]/ReLU[activation]/input.11"
+	"SuperPoint_short/Sequential[backbone]/Sequential[0]/VGGBlock[1]/ReLU[activation]/input.11" -> "SuperPoint_short/Sequential[backbone]/Sequential[0]/VGGBlock[1]/BatchNorm2d[bn]/1947"
+	"SuperPoint_short/Sequential[backbone]/Sequential[0]/VGGBlock[1]/BatchNorm2d[bn]/1947" -> "SuperPoint_short/Sequential[backbone]/Sequential[0]/MaxPool2d[2]/input.13"
+	"SuperPoint_short/Sequential[backbone]/Sequential[0]/MaxPool2d[2]/input.13" -> "SuperPoint_short/Sequential[backbone]/Sequential[1]/VGGBlock[0]/Conv2d[conv]/input.15"
+	"SuperPoint_short/Sequential[backbone]/Sequential[1]/VGGBlock[0]/Conv2d[conv]/input.15" -> "SuperPoint_short/Sequential[backbone]/Sequential[1]/VGGBlock[0]/ReLU[activation]/input.17"
+	"SuperPoint_short/Sequential[backbone]/Sequential[1]/VGGBlock[0]/ReLU[activation]/input.17" -> "SuperPoint_short/Sequential[backbone]/Sequential[1]/VGGBlock[0]/BatchNorm2d[bn]/input.19"
+	"SuperPoint_short/Sequential[backbone]/Sequential[1]/VGGBlock[0]/BatchNorm2d[bn]/input.19" -> "SuperPoint_short/Sequential[backbone]/Sequential[1]/VGGBlock[1]/Conv2d[conv]/input.21"
+	"SuperPoint_short/Sequential[backbone]/Sequential[1]/VGGBlock[1]/Conv2d[conv]/input.21" -> "SuperPoint_short/Sequential[backbone]/Sequential[1]/VGGBlock[1]/ReLU[activation]/input.23"
+	"SuperPoint_short/Sequential[backbone]/Sequential[1]/VGGBlock[1]/ReLU[activation]/input.23" -> "SuperPoint_short/Sequential[backbone]/Sequential[1]/VGGBlock[1]/BatchNorm2d[bn]/2011"
+	"SuperPoint_short/Sequential[backbone]/Sequential[1]/VGGBlock[1]/BatchNorm2d[bn]/2011" -> "SuperPoint_short/Sequential[backbone]/Sequential[1]/MaxPool2d[2]/input.25"
+	"SuperPoint_short/Sequential[backbone]/Sequential[1]/MaxPool2d[2]/input.25" -> "SuperPoint_short/Sequential[backbone]/Sequential[2]/VGGBlock[0]/Conv2d[conv]/input.27"
+	"SuperPoint_short/Sequential[backbone]/Sequential[2]/VGGBlock[0]/Conv2d[conv]/input.27" -> "SuperPoint_short/Sequential[backbone]/Sequential[2]/VGGBlock[0]/ReLU[activation]/input.29"
+	"SuperPoint_short/Sequential[backbone]/Sequential[2]/VGGBlock[0]/ReLU[activation]/input.29" -> "SuperPoint_short/Sequential[backbone]/Sequential[2]/VGGBlock[0]/BatchNorm2d[bn]/input.31"
+	"SuperPoint_short/Sequential[backbone]/Sequential[2]/VGGBlock[0]/BatchNorm2d[bn]/input.31" -> "SuperPoint_short/Sequential[backbone]/Sequential[2]/VGGBlock[1]/Conv2d[conv]/input.33"
+	"SuperPoint_short/Sequential[backbone]/Sequential[2]/VGGBlock[1]/Conv2d[conv]/input.33" -> "SuperPoint_short/Sequential[backbone]/Sequential[2]/VGGBlock[1]/ReLU[activation]/input.35"
+	"SuperPoint_short/Sequential[backbone]/Sequential[2]/VGGBlock[1]/ReLU[activation]/input.35" -> "SuperPoint_short/Sequential[backbone]/Sequential[2]/VGGBlock[1]/BatchNorm2d[bn]/2075"
+	"SuperPoint_short/Sequential[backbone]/Sequential[2]/VGGBlock[1]/BatchNorm2d[bn]/2075" -> "SuperPoint_short/Sequential[backbone]/Sequential[2]/MaxPool2d[2]/input.37"
+	"SuperPoint_short/Sequential[backbone]/Sequential[2]/MaxPool2d[2]/input.37" -> "SuperPoint_short/Sequential[backbone]/Sequential[3]/VGGBlock[0]/Conv2d[conv]/input.39"
+	"SuperPoint_short/Sequential[backbone]/Sequential[3]/VGGBlock[0]/Conv2d[conv]/input.39" -> "SuperPoint_short/Sequential[backbone]/Sequential[3]/VGGBlock[0]/ReLU[activation]/input.41"
+	"SuperPoint_short/Sequential[backbone]/Sequential[3]/VGGBlock[0]/ReLU[activation]/input.41" -> "SuperPoint_short/Sequential[backbone]/Sequential[3]/VGGBlock[0]/BatchNorm2d[bn]/input.43"
+	"SuperPoint_short/Sequential[backbone]/Sequential[3]/VGGBlock[0]/BatchNorm2d[bn]/input.43" -> "SuperPoint_short/Sequential[backbone]/Sequential[3]/VGGBlock[1]/Conv2d[conv]/input.45"
+	"SuperPoint_short/Sequential[backbone]/Sequential[3]/VGGBlock[1]/Conv2d[conv]/input.45" -> "SuperPoint_short/Sequential[backbone]/Sequential[3]/VGGBlock[1]/ReLU[activation]/input.47"
+	"SuperPoint_short/Sequential[backbone]/Sequential[3]/VGGBlock[1]/ReLU[activation]/input.47" -> "SuperPoint_short/Sequential[backbone]/Sequential[3]/VGGBlock[1]/BatchNorm2d[bn]/input.49"
+	"SuperPoint_short/Sequential[backbone]/Sequential[3]/VGGBlock[1]/BatchNorm2d[bn]/input.49" -> "SuperPoint_short/Sequential[descriptor]/VGGBlock[0]/Conv2d[conv]/input.51"
+	"SuperPoint_short/Sequential[backbone]/Sequential[3]/VGGBlock[1]/BatchNorm2d[bn]/input.49" -> "SuperPoint_short/Sequential[detector]/VGGBlock[0]/Conv2d[conv]/input.59"
+	"SuperPoint_short/Sequential[descriptor]/VGGBlock[0]/Conv2d[conv]/input.51" -> "SuperPoint_short/Sequential[descriptor]/VGGBlock[0]/ReLU[activation]/input.53"
+	"SuperPoint_short/Sequential[descriptor]/VGGBlock[0]/ReLU[activation]/input.53" -> "SuperPoint_short/Sequential[descriptor]/VGGBlock[0]/BatchNorm2d[bn]/input.55"
+	"SuperPoint_short/Sequential[descriptor]/VGGBlock[0]/BatchNorm2d[bn]/input.55" -> "SuperPoint_short/Sequential[descriptor]/VGGBlock[1]/Conv2d[conv]/input.57"
+	"SuperPoint_short/Sequential[detector]/VGGBlock[0]/Conv2d[conv]/input.59" -> "SuperPoint_short/Sequential[detector]/VGGBlock[0]/ReLU[activation]/input.61"
+	"SuperPoint_short/Sequential[detector]/VGGBlock[0]/ReLU[activation]/input.61" -> "SuperPoint_short/Sequential[detector]/VGGBlock[0]/BatchNorm2d[bn]/input.63"
+	"SuperPoint_short/Sequential[detector]/VGGBlock[0]/BatchNorm2d[bn]/input.63" -> "SuperPoint_short/Sequential[detector]/VGGBlock[1]/Conv2d[conv]/input"
+}

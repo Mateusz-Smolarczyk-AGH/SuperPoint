@@ -1,100 +1,22 @@
+import time
 import numpy as np
 import cv2
 import torch
 
 import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+print(torch.__version__)
 
 detection_thresh = 0.005
 nms_radius = 5
 
 import superpoint_pytorch
-
-def match_descriptors(kp1, desc1, kp2, desc2):
-    # Match the keypoints with the warped_keypoints with nearest neighbor search
-    bf = cv2.BFMatcher(cv2.NORM_L2, crossCheck=True)
-
-    matches = bf.match(desc1, desc2)
-    matches_idx = np.array([m.queryIdx for m in matches])
-    m_kp1 = [kp1[idx] for idx in matches_idx]
-    matches_idx = np.array([m.trainIdx for m in matches])
-    m_kp2 = [kp2[idx] for idx in matches_idx]
-
-    return m_kp1, m_kp2, matches
-
-def compute_homography(matched_kp1, matched_kp2):
-    matched_pts1 = cv2.KeyPoint_convert(matched_kp1)
-    matched_pts2 = cv2.KeyPoint_convert(matched_kp2)
-
-    # Estimate the homography between the matches using RANSAC
-    H, inliers = cv2.findHomography(matched_pts1,
-                                    matched_pts2,
-                                    cv2.RANSAC)
-    inliers = inliers.flatten()
-    return H, inliers
-
-def preprocess_image(img_file, img_size):
-    img = cv2.imread(img_file, cv2.IMREAD_COLOR)
-    img = cv2.resize(img, img_size)
-    img_orig = img.copy()
-
-    image = img.mean(-1) / 255
-    img_preprocessed = np.pad(image, [(0, int(np.ceil(s/8))*8 - s) for s in image.shape[:2]])
-
-    return img_preprocessed, img_orig
-
-def post_processing_short(scores, descriptors_dense, conf):
-    b = scores.shape[0]
-    scores = superpoint_pytorch.batched_nms(scores, conf.nms_radius)
-
-    # Discard keypoints near the image borders
-    if conf.remove_borders:
-        pad = conf.remove_borders
-        scores[:, :pad] = -1
-        scores[:, :, :pad] = -1
-        scores[:, -pad:] = -1
-        scores[:, :, -pad:] = -1
-
-    # Extract keypoints
-    if b > 1:
-        idxs = torch.where(scores > conf.detection_threshold)
-        mask = idxs[0] == torch.arange(b, device=scores.device)[:, None]
-    else:  # Faster shortcut
-        scores = scores.squeeze(0)
-        idxs = torch.where(scores > conf.detection_threshold)
-
-    # Convert (i, j) to (x, y)
-    keypoints_all = torch.stack(idxs[-2:], dim=-1).flip(1).float()
-    scores_all = scores[idxs]
-
-    keypoints = []
-    scores = []
-    descriptors = []
-    for i in range(b):
-        if b > 1:
-            k = keypoints_all[mask[i]]
-            s = scores_all[mask[i]]
-        else:
-            k = keypoints_all
-            s = scores_all
-        if conf.max_num_keypoints is not None:
-            k, s = superpoint_pytorch.select_top_k_keypoints(k, s, conf.max_num_keypoints)
-        d = superpoint_pytorch.sample_descriptors(k[None], descriptors_dense[i, None], 2 ** (len(conf.channels) - 2))
-        keypoints.append(k)
-        scores.append(s)
-        descriptors.append(d.squeeze(0).transpose(0, 1))
-
-    return {
-        "keypoints": keypoints,
-        "keypoint_scores": scores,
-        "descriptors": descriptors,
-    }
-
+import processing
 
 def show_comparison(image1_path, image2_path, model, nettype='Normal'):
-    img_size = (300, 200)
-    image1, img1_orig = preprocess_image(image1_path, img_size)
-    image2, img2_orig = preprocess_image(image2_path, img_size)
+    img_size = (200, 200)
+    image1, img1_orig = processing.preprocess_image(image1_path, img_size)
+    image2, img2_orig = processing.preprocess_image(image2_path, img_size)
 
     # Run inference for both images
     images = [image1, image2]
@@ -107,7 +29,7 @@ def show_comparison(image1_path, image2_path, model, nettype='Normal'):
                 pred_th_1 = model({'image': torch.from_numpy(image[None, None]).float()})
             else:
                 scores, descriptors_dense = model(torch.from_numpy(image[None, None]).float())
-                pred_th_1 = post_processing_short(scores, descriptors_dense, model.conf)
+                pred_th_1 = processing.post_processing_short(scores, descriptors_dense, model.conf)
         # Extract descriptors
         descriptors = pred_th_1['descriptors'][0]
         points_th = pred_th_1['keypoints'][0]
@@ -117,8 +39,8 @@ def show_comparison(image1_path, image2_path, model, nettype='Normal'):
         desc_list.append(descriptors.cpu().detach().numpy().astype(np.float32)
 )
 
-    m_kp1, m_kp2, matches = match_descriptors(keypoints_list[0], desc_list[0], keypoints_list[1], desc_list[1])
-    H, inliers = compute_homography(m_kp1, m_kp2)
+    m_kp1, m_kp2, matches = processing.match_descriptors(keypoints_list[0], desc_list[0], keypoints_list[1], desc_list[1])
+    H, inliers = processing.compute_homography(m_kp1, m_kp2)
 
     # Draw SuperPoint matches
     matches = np.array(matches)[inliers.astype(bool)].tolist()
@@ -147,7 +69,99 @@ def test_on_HPatches(dir_name, nettype='Normal'):
     vertical_stack = np.vstack(resized_images)
     cv2.imwrite("data/matched_image.png", vertical_stack)
 
-test_on_HPatches("/i_kions", nettype="Unnormal")
-model = torch.load("weights/superpoint_v6_from_tf.pth", map_location="cpu")
-torch.save(model, "model_weights_legacy.pth", _use_new_zipfile_serialization=False)
+def sequence(image_folder):
+    image_files = sorted([f for f in os.listdir(image_folder) if f.endswith((".png", ".jpg", ".ppm"))])
+    first_image = cv2.imread(os.path.join(image_folder, image_files[0]))
+    height, width, _ = first_image.shape
 
+    # Wyświetlanie obrazów jako filmu
+    for image_file in image_files:
+        image_path = os.path.join(image_folder, image_file)
+        frame = cv2.imread(image_path)
+        
+        if frame is None:
+            continue
+        
+        cv2.imshow("Film", frame)
+        
+        # Czekaj 30 ms na kolejny obraz (około 30 FPS)
+        if cv2.waitKey(30) & 0xFF == ord('q'):
+            break  # Wyjście z pętli po naciśnięciu 'q'
+
+    cv2.destroyAllWindows()
+
+    
+def compute_sequence(image_folder, model, tryb='show'):
+    image_files = sorted([f for f in os.listdir(image_folder) if f.endswith((".png", ".jpg", ".ppm"))])
+    first_image = cv2.imread(os.path.join(image_folder, image_files[0]))
+    height, width, _ = first_image.shape
+    past_descriptors = None
+    past_keypoints = None
+    pre_times = []
+    net_times = []
+    post_times = []
+    matching_times = []
+    all_times = []
+    matches_list = []
+    matches = []
+    for i in range(0, len(image_files), 3):
+        image_file = image_files[i]
+        image_path = os.path.join(image_folder, image_file)
+        time1 = time.perf_counter()
+        image, img_orig = processing.preprocess_image(image_path, (200, 200))
+        time2 = time.perf_counter()
+        scores, descriptors_dense = model(torch.from_numpy(image[None, None]).float())
+        time3 = time.perf_counter()
+        pred_th_1 = processing.post_processing_short(scores, descriptors_dense, model.conf)
+        descriptors = pred_th_1['descriptors'][0].cpu().detach().numpy().astype(np.float32)
+        points_th = pred_th_1['keypoints'][0]
+        keypoints_np = np.array(points_th)  # Konwersja do NumPy
+        time4 = time.perf_counter()
+        keypoints = [cv2.KeyPoint(float(p[0]), float(p[1]), 1) for p in keypoints_np]
+        if past_descriptors is not None:
+            m_kp1, m_kp2, matches = processing.match_descriptors(past_keypoints, past_descriptors, keypoints, descriptors)
+            H, inliers = processing.compute_homography(m_kp1, m_kp2)
+            matches = np.array(matches)[inliers.astype(bool)].tolist()
+
+            for match in matches:
+                pt1 = tuple(map(int, past_keypoints[match.queryIdx].pt))
+                pt2 = tuple(map(int, keypoints[match.trainIdx].pt))
+                cv2.arrowedLine(img_orig, pt2, pt1, (0, 255, 0), 1, tipLength=0.2)
+
+        past_descriptors = descriptors
+        past_keypoints = keypoints
+        end = time.perf_counter()
+
+        if tryb=='show':
+            cv2.imshow("Film", img_orig)
+            
+            # Czekaj 30 ms na kolejny obraz (około 30 FPS)
+            if cv2.waitKey(30) & 0xFF == ord('q'):
+                break  # Wyjście z pętli po naciśnięciu 'q'
+        if tryb=='save':
+            cv2.imwrite("data/matched/" + image_file, img_orig)
+        if tryb=='time':
+            pre_times.append(time2 - time1)
+            net_times.append(time3 - time2)
+            post_times.append(time4 - time3)
+            matching_times.append(end - time4)
+            all_times.append(end-time1)
+            matches_list.append(len(matches))
+    if tryb=='show':
+        cv2.destroyAllWindows()
+    if tryb=='time':
+        num_iterations = len(pre_times) - 1
+        avg_pre = sum(pre_times[1:]) / num_iterations * 1000
+        avg_net = sum(net_times[1:]) / num_iterations * 1000
+        avg_post = sum(post_times[1:]) / num_iterations * 1000
+        avg_matching = sum(matching_times[1:]) / num_iterations * 1000
+        avg_all = sum(all_times[1:]) / num_iterations * 1000
+        avg_matches = sum(matches_list[1:]) / num_iterations
+
+        return avg_pre, avg_net, avg_post, avg_matching, avg_all, avg_matches
+
+model = superpoint_pytorch.SuperPoint_short(detection_threshold=detection_thresh, nms_radius=nms_radius).eval()
+model.load_state_dict(torch.load("weights/superpoint_v6_from_tf.pth"))
+image_folder = "data//rgbd_dataset_freiburg1_xyz//rgb"
+avg_pre, avg_net, avg_post, avg_matching, avg_all, avg_matches = compute_sequence(image_folder, model, tryb='time')
+print(f"Średnie czasy (ms): pre: {avg_pre:.6f} | net: {avg_net:.6f} | post: {avg_post:.6f} | matching: {avg_matching:.6f} | all: {avg_all:.6f} | matches: {avg_matches:.6f}")

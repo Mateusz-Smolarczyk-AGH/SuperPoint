@@ -1,0 +1,8 @@
+{
+    "lib": "libvart-dpu-runner.so",
+    "filename": "SuperPoint_qu.xmodel",
+    "kernel": [
+        "subgraph_SuperPoint_short__SuperPoint_short_Sequential_backbone__Sequential_0__MaxPool2d_2__input_13"
+    ],
+    "target": "DPUCZDX8G_ISA1_B4096"
+}

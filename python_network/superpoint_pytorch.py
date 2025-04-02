@@ -6,7 +6,7 @@ import torch.nn as nn
 import torch
 from collections import OrderedDict
 from types import SimpleNamespace
-
+import time
 
 def sample_descriptors(keypoints, descriptors, s: int = 8):
     """Interpolate descriptors at keypoint locations"""
@@ -209,6 +209,7 @@ class SuperPoint_short(nn.Module):
         image = data
 
         features = self.backbone(image)
+
         descriptors_dense = torch.nn.functional.normalize(
             self.descriptor(features), p=2, dim=1
         )
@@ -224,4 +225,67 @@ class SuperPoint_short(nn.Module):
             b, h * self.stride, w * self.stride
         )
         return scores, descriptors_dense
+    
+    def post_processing(scores, descriptors_dense):
+        scores = batched_nms(scores, 4)
+        scores = scores.squeeze(0)
+        idxs = torch.where(scores > 0.005)
+        keypoints_all = torch.stack(idxs[-2:], dim=-1).flip(1).float()
+        scores_all = scores[idxs]
+
+        descriptors_dense = torch.nn.functional.normalize(descriptors_dense, p=2, dim=1)
+
+        d = sample_descriptors(keypoints_all[None], descriptors_dense[0, None], 8)
+        descriptors = d.squeeze(0).transpose(0, 1)
+        return scores_all, descriptors
         
+class SuperPoint_short_quant(nn.Module):
+    default_conf = {
+        "nms_radius": 4,
+        "max_num_keypoints": 500,
+        "detection_threshold": 0.005,
+        "remove_borders": 4,
+        "descriptor_dim": 256,
+        "channels": [64, 64, 128, 128, 256],
+    }
+
+    def __init__(self, **conf):
+        super().__init__()
+        conf = {**self.default_conf, **conf}
+        self.conf = conf
+        self.stride = 2 ** (len(self.conf["channels"]) - 2)
+        channels = [1, *self.conf["channels"][:-1]]
+
+        # Definicja QuantStub
+        self.quant = torch.quantization.QuantStub()
+        self.dequant = torch.quantization.DeQuantStub()
+
+        backbone = []
+        for i, c in enumerate(channels[1:], 1):
+            layers = [VGGBlock(channels[i - 1], c, 3), VGGBlock(c, c, 3)]
+            if i < len(channels) - 1:
+                layers.append(nn.MaxPool2d(kernel_size=2, stride=2))
+            backbone.append(nn.Sequential(*layers))
+        self.backbone = nn.Sequential(*backbone)
+
+        c = self.conf["channels"][-1]
+        self.detector = nn.Sequential(
+            VGGBlock(channels[-1], c, 3),
+            VGGBlock(c, self.stride**2 + 1, 1, relu=False),
+        )
+        self.descriptor = nn.Sequential(
+            VGGBlock(channels[-1], c, 3),
+            VGGBlock(c, self.conf["descriptor_dim"], 1, relu=False),
+        )
+
+    def forward(self, data):
+        # Kwantyzacja wejścia
+        image = self.quant(data)
+
+        features = self.backbone(image)
+        descriptors_dense = self.descriptor(features)
+
+        # Decode the detection scores
+        scores = self.detector(features)
+        # Dekwantyzacja przed wyjściem
+        return self.dequant(scores), self.dequant(descriptors_dense)
