@@ -17,7 +17,10 @@ import superpoint_pytorch
 import processing
 
 
-def show_comparison(image1_path, image2_path, model, nettype="Normal"):
+def show_comparison(image1_path, image2_path, model, nettype="Normal", device="cuda"):
+
+    model = model.to(device)  # Move model to GPU if available
+
     img_size = (200, 200)
     image1, img1_orig = processing.preprocess_image(image1_path, img_size)
     image2, img2_orig = processing.preprocess_image(image2_path, img_size)
@@ -31,11 +34,11 @@ def show_comparison(image1_path, image2_path, model, nettype="Normal"):
         with torch.no_grad():
             if nettype == "Normal":
                 pred_th_1 = model(
-                    {"image": torch.from_numpy(image[None, None]).float()}
+                    {"image": torch.from_numpy(image[None, None]).float().to(device)}
                 )
             else:
                 scores, descriptors_dense = model(
-                    torch.from_numpy(image[None, None]).float()
+                    torch.from_numpy(image[None, None]).float().to(device)
                 )
                 pred_th_1 = processing.post_processing_short(
                     scores, descriptors_dense, model.conf
@@ -69,7 +72,9 @@ def show_comparison(image1_path, image2_path, model, nettype="Normal"):
     return matched_img
 
 
-def test_on_HPatches(dir_name, nettype="Normal"):
+def test_on_HPatches(dir_name, nettype="Normal", device="cuda"):
+
+    model = model.to(device)  # Move model to GPU if available
     if nettype == "Normal":
         model = superpoint_pytorch.SuperPoint(
             detection_threshold=detection_thresh, nms_radius=nms_radius
@@ -87,7 +92,9 @@ def test_on_HPatches(dir_name, nettype="Normal"):
     for i in range(2, 7):
         img_path2 = datadir + dir_name + f"/{i}.ppm"
         transformation = datadir + dir_name + f"/H_{1}_{i}"
-        image_list.append(show_comparison(img_path1, img_path2, model, nettype))
+        image_list.append(
+            show_comparison(img_path1, img_path2, model, nettype, device=device)
+        )
         print(f"Progres: {int(((i-1)/5)*100)}%")
     h, w = image_list[0].shape[:2]
     resized_images = [cv2.resize(img, (w, h)) for img in image_list]
@@ -119,7 +126,10 @@ def sequence(image_folder):
     cv2.destroyAllWindows()
 
 
-def compute_sequence(image_folder, model, tryb="show"):
+def compute_sequence(image_folder, model, tryb="show", device="cuda"):
+
+    model = model.to(device)  # Move model to GPU if available
+
     image_files = sorted(
         [f for f in os.listdir(image_folder) if f.endswith((".png", ".jpg", ".ppm"))]
     )
@@ -140,7 +150,9 @@ def compute_sequence(image_folder, model, tryb="show"):
         time1 = time.perf_counter()
         image, img_orig = processing.preprocess_image(image_path, (200, 200))
         time2 = time.perf_counter()
-        scores, descriptors_dense = model(torch.from_numpy(image[None, None]).float())
+        scores, descriptors_dense = model(
+            torch.from_numpy(image[None, None]).float().to(device)
+        )
         time3 = time.perf_counter()
         pred_th_1 = processing.post_processing_short(
             scores, descriptors_dense, model.conf
@@ -149,7 +161,11 @@ def compute_sequence(image_folder, model, tryb="show"):
             pred_th_1["descriptors"][0].cpu().detach().numpy().astype(np.float32)
         )
         points_th = pred_th_1["keypoints"][0]
-        keypoints_np = np.array(points_th)  # Konwersja do NumPy
+        keypoints_np = points_th.cpu().detach().numpy()
+        keypoints_np = np.array(keypoints_np)  # Konwersja do NumPy
+        keypoints_np = keypoints_np.reshape(
+            -1, 2
+        )  # Upewnij się, że ma odpowiedni kształt
         time4 = time.perf_counter()
         keypoints = [cv2.KeyPoint(float(p[0]), float(p[1]), 1) for p in keypoints_np]
         if past_descriptors is not None:
@@ -198,14 +214,22 @@ def compute_sequence(image_folder, model, tryb="show"):
 
 
 if __name__ == "__main__":
-    
-    model = superpoint_pytorch.SuperPoint_short(
-        detection_threshold=detection_thresh, nms_radius=nms_radius
-    ).eval()
+
+    # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = "cpu"
+    print(f"Using device: {device}")
+
+    model = (
+        superpoint_pytorch.SuperPoint_short(
+            detection_threshold=detection_thresh, nms_radius=nms_radius
+        )
+        .to(device)
+        .eval()
+    )
     model.load_state_dict(torch.load("weights/superpoint_v6_from_tf.pth"))
     image_folder = "data/rgbd_dataset_freiburg1_xyz/rgb"
     avg_pre, avg_net, avg_post, avg_matching, avg_all, avg_matches = compute_sequence(
-        image_folder, model, tryb="time"
+        image_folder, model, tryb="time", device=device
     )
     print(
         f"Średnie czasy (ms): pre: {avg_pre:.6f} | net: {avg_net:.6f} | post: {avg_post:.6f} | matching: {avg_matching:.6f} | all: {avg_all:.6f} | matches: {avg_matches:.6f}"
