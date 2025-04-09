@@ -4,7 +4,6 @@ import time
 import numpy as np
 import cv2
 import torch
-from scipy.spatial.transform import Rotation as R
 
 import os
 
@@ -18,7 +17,10 @@ import superpoint_pytorch
 import processing
 
 
-def show_comparison(image1_path, image2_path, model, nettype="Normal"):
+def show_comparison(image1_path, image2_path, model, nettype="Normal", device="cuda"):
+
+    model = model.to(device)  # Move model to GPU if available
+
     img_size = (200, 200)
     image1, img1_orig = processing.preprocess_image(image1_path, img_size)
     image2, img2_orig = processing.preprocess_image(image2_path, img_size)
@@ -32,11 +34,11 @@ def show_comparison(image1_path, image2_path, model, nettype="Normal"):
         with torch.no_grad():
             if nettype == "Normal":
                 pred_th_1 = model(
-                    {"image": torch.from_numpy(image[None, None]).float()}
+                    {"image": torch.from_numpy(image[None, None]).float().to(device)}
                 )
             else:
                 scores, descriptors_dense = model(
-                    torch.from_numpy(image[None, None]).float()
+                    torch.from_numpy(image[None, None]).float().to(device)
                 )
                 pred_th_1 = processing.post_processing_short(
                     scores, descriptors_dense, model.conf
@@ -70,7 +72,9 @@ def show_comparison(image1_path, image2_path, model, nettype="Normal"):
     return matched_img
 
 
-def test_on_HPatches(dir_name, nettype="Normal"):
+def test_on_HPatches(dir_name, nettype="Normal", device="cuda"):
+
+    model = model.to(device)  # Move model to GPU if available
     if nettype == "Normal":
         model = superpoint_pytorch.SuperPoint(
             detection_threshold=detection_thresh, nms_radius=nms_radius
@@ -88,7 +92,9 @@ def test_on_HPatches(dir_name, nettype="Normal"):
     for i in range(2, 7):
         img_path2 = datadir + dir_name + f"/{i}.ppm"
         transformation = datadir + dir_name + f"/H_{1}_{i}"
-        image_list.append(show_comparison(img_path1, img_path2, model, nettype))
+        image_list.append(
+            show_comparison(img_path1, img_path2, model, nettype, device=device)
+        )
         print(f"Progres: {int(((i-1)/5)*100)}%")
     h, w = image_list[0].shape[:2]
     resized_images = [cv2.resize(img, (w, h)) for img in image_list]
@@ -120,7 +126,10 @@ def sequence(image_folder):
     cv2.destroyAllWindows()
 
 
-def compute_sequence(image_folder, model, tryb="show"):
+def compute_sequence(image_folder, model, tryb="show", device="cuda"):
+
+    model = model.to(device)  # Move model to GPU if available
+
     image_files = sorted(
         [f for f in os.listdir(image_folder) if f.endswith((".png", ".jpg", ".ppm"))]
     )
@@ -135,34 +144,15 @@ def compute_sequence(image_folder, model, tryb="show"):
     all_times = []
     matches_list = []
     matches = []
-    R_list = []
-    fx = 517.3  # focal length x
-    fy = 516.5  # focal length y
-    cx = 318.6  # optical center x
-    cy = 255.3 # optical center y
-    K = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]])
-
-    # Translacja
-    t_total = np.array([[1.3563],
-                        [0.6305],
-                        [1.6380]])
-
-    # Rotacja z kwaternionu
-    q = [0.6132, 0.5962, -0.3311, -0.3986] 
-    R_total = R.from_quat(q).as_matrix()
-    trajectory = [t_total.flatten().tolist()]
-    R_list = [R_total.tolist()]
-    lenght = len(image_files)
-    for i in range(0, 20):
-        print(f"Processing: {i/20 * 100}%")
+    for i in range(0, len(image_files), 3):
         image_file = image_files[i]
         image_path = os.path.join(image_folder, image_file)
         time1 = time.perf_counter()
-        image, img_orig = processing.preprocess_image(image_path, (width, height))
-
-
+        image, img_orig = processing.preprocess_image(image_path, (200, 200))
         time2 = time.perf_counter()
-        scores, descriptors_dense = model(torch.from_numpy(image[None, None]).float())
+        scores, descriptors_dense = model(
+            torch.from_numpy(image[None, None]).float().to(device)
+        )
         time3 = time.perf_counter()
         pred_th_1 = processing.post_processing_short(
             scores, descriptors_dense, model.conf
@@ -171,7 +161,11 @@ def compute_sequence(image_folder, model, tryb="show"):
             pred_th_1["descriptors"][0].cpu().detach().numpy().astype(np.float32)
         )
         points_th = pred_th_1["keypoints"][0]
-        keypoints_np = np.array(points_th)  # Konwersja do NumPy
+        keypoints_np = points_th.cpu().detach().numpy()
+        keypoints_np = np.array(keypoints_np)  # Konwersja do NumPy
+        keypoints_np = keypoints_np.reshape(
+            -1, 2
+        )  # Upewnij się, że ma odpowiedni kształt
         time4 = time.perf_counter()
         keypoints = [cv2.KeyPoint(float(p[0]), float(p[1]), 1) for p in keypoints_np]
         if past_descriptors is not None:
@@ -181,19 +175,10 @@ def compute_sequence(image_folder, model, tryb="show"):
             H, inliers = processing.compute_homography(m_kp1, m_kp2)
             matches = np.array(matches)[inliers.astype(bool)].tolist()
 
-            if tryb == 'show':
-                for match in matches:
-                    pt1 = tuple(map(int, past_keypoints[match.queryIdx].pt))
-                    pt2 = tuple(map(int, keypoints[match.trainIdx].pt))
-                    cv2.arrowedLine(img_orig, pt2, pt1, (0, 255, 0), 1, tipLength=0.2)
-
-            if tryb == "points":
-                points = np.array([[past_keypoints[match.queryIdx].pt, keypoints[match.trainIdx].pt] for match in matches], dtype=np.float32)
-                m_kp1_float = points[:, 0]
-                m_kp2_float = points[:, 1]
-                t_total, R_total = pose_estimation(m_kp1_float, m_kp2_float, K, t_total, R_total)
-                trajectory.append(t_total.flatten().tolist())
-                R_list.append(R_total.tolist())
+            for match in matches:
+                pt1 = tuple(map(int, past_keypoints[match.queryIdx].pt))
+                pt2 = tuple(map(int, keypoints[match.trainIdx].pt))
+                cv2.arrowedLine(img_orig, pt2, pt1, (0, 255, 0), 1, tipLength=0.2)
 
         past_descriptors = descriptors
         past_keypoints = keypoints
@@ -214,7 +199,7 @@ def compute_sequence(image_folder, model, tryb="show"):
             matching_times.append(end - time4)
             all_times.append(end - time1)
             matches_list.append(len(matches))
-    if tryb=='show':
+    if tryb == "show":
         cv2.destroyAllWindows()
     if tryb == "time":
         num_iterations = len(pre_times) - 1
@@ -224,20 +209,28 @@ def compute_sequence(image_folder, model, tryb="show"):
         avg_matching = sum(matching_times[1:]) / num_iterations * 1000
         avg_all = sum(all_times[1:]) / num_iterations * 1000
         avg_matches = sum(matches_list[1:]) / num_iterations
-        return avg_pre, avg_net, avg_post, avg_matching, avg_all, 
-    if tryb == 'points':
-        return np.array(trajectory), np.array(R_list)
-        
-def pose_estimation(points1, points2, K, t_total, R_total):
-    E, mask = cv2.findEssentialMat(points1, points2, K,  method=cv2.RANSAC, prob=0.999, threshold=3.0)
-    points, R, t, mask = cv2.recoverPose(E, points1, points2, K)
-    R_total = R_total @ R
-    t_total = t_total + R_total @ t
-    return t_total, R_total
+
+        return avg_pre, avg_net, avg_post, avg_matching, avg_all, avg_matches
 
 
-model = superpoint_pytorch.SuperPoint_short(detection_threshold=detection_thresh, nms_radius=nms_radius).eval()
-model.load_state_dict(torch.load("weights/superpoint_v6_from_tf.pth"))
-image_folder = "data//rgbd_dataset_freiburg1_xyz//rgb"
-avg_pre, avg_net, avg_post, avg_matching, avg_all, avg_matches = compute_sequence(image_folder, model, tryb='time')
-print(f"Średnie czasy (ms): pre: {avg_pre:.6f} | net: {avg_net:.6f} | post: {avg_post:.6f} | matching: {avg_matching:.6f} | all: {avg_all:.6f} | matches: {avg_matches:.6f}")
+if __name__ == "__main__":
+
+    # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = "cpu"
+    print(f"Using device: {device}")
+
+    model = (
+        superpoint_pytorch.SuperPoint_short(
+            detection_threshold=detection_thresh, nms_radius=nms_radius
+        )
+        .to(device)
+        .eval()
+    )
+    model.load_state_dict(torch.load("weights/superpoint_v6_from_tf.pth"))
+    image_folder = "data/rgbd_dataset_freiburg1_xyz/rgb"
+    avg_pre, avg_net, avg_post, avg_matching, avg_all, avg_matches = compute_sequence(
+        image_folder, model, tryb="time", device=device
+    )
+    print(
+        f"Średnie czasy (ms): pre: {avg_pre:.6f} | net: {avg_net:.6f} | post: {avg_post:.6f} | matching: {avg_matching:.6f} | all: {avg_all:.6f} | matches: {avg_matches:.6f}"
+    )
