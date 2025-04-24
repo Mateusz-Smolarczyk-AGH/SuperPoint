@@ -10,10 +10,10 @@ import superpoint_pytorch
 import processing
 import os
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
-start = 30
-end = 200
+start = 0
+end = 15
 
-def compute_sequence(data_folder, start_t, start_r):
+def compute_sequence(data_folder, t_gt, start_r):
     pre_times = []
     net_times = []
     post_times = []
@@ -31,6 +31,7 @@ def compute_sequence(data_folder, start_t, start_r):
     lenght = len(image_files)
 
     camera = processing.PinholeCamera(517.3, 516.5, 318.6, 255.3, 0.2624, -0.9531, -0.0054,	0.0026,	1.1633)
+    start_t = t_gt[0]
     t_start = np.array([[start_t[0]],
                         [start_t[1]],
                         [start_t[2]]])
@@ -48,7 +49,7 @@ def compute_sequence(data_folder, start_t, start_r):
         image_file = image_files[i]
         image_path = os.path.join(image_folder, image_file)
         image = cv2.imread(image_path)
-        skip_frame, time = odometry.compute_pipeline(image)
+        skip_frame, time = odometry.compute_pipeline(image, t_gt[i-start], t_gt[i-start - 1])
         if skip_frame == 0:
             odometry.keypoints["past"] = odometry.keypoints["present"]
             odometry.descriptors["past"] = odometry.descriptors["present"]
@@ -94,41 +95,26 @@ def get_gt(start, end, file):
     quaternions = matched_gt[:, 4:8]  # qx, qy, qz, qw
     gt_rot = R.from_quat(quaternions)  # scipy używa kolejności: x, y, z, w
     gt_euler = gt_rot.as_euler('zyx', degrees=True)  # yaw, pitch, roll
-    tx, ty, tz = matched_gt[:, 1], matched_gt[:, 2], matched_gt[:, 3]
-    return tx, ty, tz, gt_euler
+    t = matched_gt[:, 1:4]
+    return t, gt_euler
 
-file = r"data\rgbd_dataset_freiburg1_floor"
-tx, ty, tz, gt_euler = get_gt(start, end, file)
-trajectory, est_euler = compute_sequence(file, (tx[0], ty[0], tz[0]), gt_euler[0])
+file = r"data\rgbd_dataset_freiburg1_xyz"
+gt_t, gt_euler = get_gt(start, end, file)
+trajectory, est_euler = compute_sequence(file, gt_t, gt_euler[0])
 tx_est, ty_est, tz_est = trajectory[:, 0], trajectory[:, 1], trajectory[:, 2]
+tx, ty, tz = gt_t[:, 0], gt_t[:, 1], gt_t[:, 2]
 # Wykres 3D
 fig = plt.figure()
 ax = fig.add_subplot(111, projection='3d')
 ax.plot(tx_est, ty_est, tz_est, label='Trajektoria estymowana', color='red')
+ax.plot(tx, ty, tz, label='Trajektoria GT', color='blue')
+
 ax.scatter(tx_est[0], ty_est[0], tz_est[0], color='black', marker='o', s=50, label='Punkt startowy')
-# ax.set_xlim([-25, 25])
-# ax.set_ylim([-25, 25])
-# ax.set_zlim([-25, 25])
 ax.set_xlabel("X")
 ax.set_ylabel("Y")
 ax.set_zlabel("Z")
 ax.set_title("Trajektoria estymowana")
 ax.legend()
-
-# Wykres 3D
-fig1 = plt.figure()
-ax2 = fig1.add_subplot(111, projection='3d')
-ax2.plot(tx, ty, tz, label='Trajektoria GT', color='blue')
-ax2.scatter(tx[0], ty[0], tz[0], color='black', marker='o', s=50, label='Punkt startowy')
-# ax2.set_xlim([1, 1.4])
-# ax2.set_ylim([-1.2, -0.8])
-# ax2.set_zlim([0.4, 0.8])
-ax2.set_xlabel("X")
-ax2.set_ylabel("Y")
-ax2.set_zlabel("Z")
-ax2.set_title("Trajektoria GT")
-ax2.legend()
-
 
 plt.figure(figsize=(12, 6))
 

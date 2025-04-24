@@ -122,7 +122,7 @@ class VisualOdometry():
         self.pp = (cam.cx, cam.cy)
         self.K = np.array([[cam.fx, 0, cam.cx], [0, cam.fy, cam.cy], [0, 0, 1]])
         self.d = cam.d
-        self.trajectory = [self.t_total.flatten().tolist()]
+        self.trajectory = [self.start_t.flatten().tolist()]
         r = R.from_matrix(start_R)
         angles = r.as_euler('zyx', degrees=True)  # yaw, pitch, roll
         self.R_list = [angles]
@@ -158,19 +158,14 @@ class VisualOdometry():
             pt1 = tuple(map(int, self.keypoints["past"][match.queryIdx].pt))
             pt2 = tuple(map(int, self.keypoints["present"][match.trainIdx].pt))
             cv2.arrowedLine(self.feature_detection.input_image, pt2, pt1, (0, 255, 0), 1, tipLength=0.2)
-
-    def rotation_angle(self, R):
-        R_diff = R @ self.R_total.T
-        angle = np.arccos((np.trace(R_diff) - 1) / 2)
-        return np.degrees(angle)
     
-    def pose_estimation(self, points1, points2):
+    def pose_estimation(self, points1, points2, abs_scale):
         E, mask = cv2.findEssentialMat(points2, points1, focal=self.focal, pp=self.pp,  method=cv2.RANSAC, prob=0.999, threshold=1.0)
         points, R_diff, t, mask = cv2.recoverPose(E, points2[mask.ravel().astype(bool)], points1[mask.ravel().astype(bool)], focal=self.focal, pp=self.pp)
         angles_change = R.from_matrix(R_diff).as_euler('zyx', degrees=True)
         if np.any(np.abs(angles_change) > 15):
             return 1
-        self.t_total = self.t_total + self.R_total.dot(t)
+        self.t_total = self.t_total + abs_scale * self.R_total.dot(t)
         self.R_total = self.R_total.dot(R_diff)
         return 0
 
@@ -178,24 +173,30 @@ class VisualOdometry():
         self.feature_detection.get_input(image)
         self.keypoints["past"], self.descriptors["past"], _, _ = self.feature_detection.process_Superpoint()
 
-    def compute_pipeline(self, image):
+    def compute_pipeline(self, image, pos_cur, pos_prev):
         start = time.perf_counter()
+        #preprocessing
         self.feature_detection.get_input(image)
         pre = time.perf_counter()
+        #superPoint
         self.keypoints["present"], self.descriptors["present"], net, post = self.feature_detection.process_Superpoint()
         match = time.perf_counter()
+        #matching
         m_kp1, m_kp2 = self.match_descriptors()
         H, inliers = self.compute_homography(m_kp1, m_kp2)
         self.matches = np.array(self.matches)[inliers.astype(bool)].tolist()
         pts1 = np.float32([self.keypoints["past"][match.queryIdx].pt for match in self.matches])  # shape (N, 2)
         pts2 = np.float32([self.keypoints["present"][match.trainIdx].pt for match in self.matches])  # shape (N, 2)
         end = time.perf_counter()
-        result = self.pose_estimation(pts1, pts2)
+        #pose estimation
+        abs_scale = np.sqrt((pos_cur[0] - pos_prev[0])*(pos_cur[0] - pos_prev[0]) + (pos_cur[1] - pos_prev[1])*(pos_cur[1] - pos_prev[1]) + (pos_cur[1] - pos_prev[1])*(pos_cur[1] - pos_prev[1]))
+        result = self.pose_estimation(pts1, pts2, abs_scale)
         r_global = self.start_R.dot(self.R_total)
         r = R.from_matrix(r_global)
         angles = r.as_euler('zyx', degrees=True)  # yaw, pitch, roll
         self.R_list.append(angles)
         if result == 0:
+            # trac = self.t_total + self.start_t
             trac = self.start_R.dot(self.t_total) + self.start_t
             self.trajectory.append(trac.flatten().tolist())
             self.show_arrows()
