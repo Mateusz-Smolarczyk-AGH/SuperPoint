@@ -3,5 +3,7 @@ weights/binary_weights/**
 data/rgbd_dataset_freiburg1_xyz/**
 data/rgbd_dataset_freiburg1_rpy/**
 data/rgbd_dataset_freiburg1_floor/**
-
 data/matched/**
+outputs_batch_**
+**.xmodel
+**.pyc
