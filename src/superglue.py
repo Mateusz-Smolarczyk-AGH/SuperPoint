@@ -218,7 +218,7 @@ class SuperGlue(nn.Module):
 
         bin_score = torch.nn.Parameter(torch.tensor(1.))
         self.register_parameter('bin_score', bin_score)
-        self.load_state_dict(torch.load(self.config['superglue_weights']))
+        self.load_state_dict(torch.load(self.config['superglue_weights'], weights_only=True))
         print('Loaded SuperGlue model (\"{}\" weights)'.format(
             self.config['weights']))
 

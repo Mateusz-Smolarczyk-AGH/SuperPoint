@@ -18,29 +18,31 @@ class PinholeCamera:
         self.d = np.array([d0, d1, d2, d3, d4])
 
 class Feature_detection():
-    def __init__(self, image_size, camera):
+    def __init__(self, image_size, camera, database):
         self.input_image = None
         self.input = None
         # self.model = superpoint_pytorch.SuperPoint_short(detection_threshold=0.005, nms_radius=5).eval()
-        # self.model.load_state_dict(torch.load("weights/superpoint_v6_from_tf.pth"))
+        # self.model.load_state_dict(torch.load("weights/superpoint_v6_from_tf.pth", weights_only=True))
         self.model = superpoint_pytorch.SuperPointNet(
             detection_threshold=0.005, nms_radius=5
         ).eval()
-        if weight_path is not None:
-            self.model.load_state_dict(torch.load(weight_path))
-
+        self.model.load_state_dict(torch.load("weights/superpoint_v1.pth", weights_only=True))
+        self.database = database
         self.image_size = image_size
         self.K_l = np.array([camera.fx, 0.0, camera.cx, 0.0, camera.fy, camera.cy, 0.0, 0.0, 1.0]).reshape(3, 3)
         self.d_l = camera.d
 
-    def get_input(self, image) -> None:
+    def get_input(self, img) -> None:
         """
         Preprocess raw image from camera or dataset.
         """
-        # img = cv2.resize(image, self.image_size)
-        img = cv2.resize(image, (self.image_size[0] + 32, self.image_size[1] + 16))
-        img = cv2.undistort(img, self.K_l, self.d_l)
-        img = img[8:-8, 16:-16, :]
+        if self.database == "tum":
+            img = cv2.resize(img, (self.image_size[0] + 32, self.image_size[1] + 16))
+            img = cv2.undistort(img, self.K_l, self.d_l)
+            img = img[8:-8, 16:-16, :]
+        else:
+            img = cv2.resize(img, self.image_size)
+
         self.input_image = img.copy()
         self.input = img.mean(-1) / 255
 
@@ -116,7 +118,7 @@ class Feature_detection():
         }
 
 class VisualOdometry():
-    def __init__(self, image_size, start_R, start_t, cam: PinholeCamera, matching_type='bf'):
+    def __init__(self, image_size, start_R, start_t, cam: PinholeCamera, matching_type='bf', database='tum'):
         # self.keypoints = {"past": None,
         #                   "present": None}
 
@@ -125,7 +127,7 @@ class VisualOdometry():
         self.past_predictions = {}
         self.present_predictions = {}
         self.matches = None
-        self.feature_detection = Feature_detection(image_size, cam)
+        self.feature_detection = Feature_detection(image_size, cam, database)
         self.R_total = np.eye(3)
         self.start_R = start_R
         self.t_total = np.zeros((3, 1))
@@ -165,7 +167,7 @@ class VisualOdometry():
         kp1 = self.past_predictions["keypoints"]
         kp2 = self.present_predictions["keypoints"]
         self.matches = bf.match(self.past_predictions["descriptors"], self.present_predictions["descriptors"])
-        self.matches = sorted(self.matches, key = lambda x:x.distance)
+        # self.matches = sorted(self.matches, key = lambda x:x.distance)
         # if len(self.matches) > 200:
         #     self.matches = self.matches[:200]
         matches_idx = np.array([m.queryIdx for m in self.matches])
@@ -249,6 +251,9 @@ class VisualOdometry():
         points_th = self.past_predictions['raw']['keypoints'][0]
         keypoints_np = np.array(points_th)
         self.past_predictions['keypoints'] = [cv2.KeyPoint(float(p[0]), float(p[1]), 1) for p in keypoints_np]
+        # gray= cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        # sift = cv2.SIFT_create()
+        # self.past_predictions['keypoints'], self.past_predictions['descriptors'] = sift.detectAndCompute(gray,None)
 
     def compute_pipeline(self, image, pos_cur=None, pos_prev=None):
         start = time.perf_counter()
@@ -257,12 +262,18 @@ class VisualOdometry():
         pre = time.perf_counter()
         #superPoint
         self.present_predictions['raw'], net, post = self.feature_detection.process_Superpoint()
+        # net = 0
+        # post = 0
         match = time.perf_counter()
         #matching
         self.present_predictions['descriptors'] = self.present_predictions['raw']['descriptors'][0].cpu().detach().numpy().astype(np.float32)
         points_th = self.present_predictions['raw']['keypoints'][0]
         keypoints_np = np.array(points_th)
         self.present_predictions['keypoints'] = [cv2.KeyPoint(float(p[0]), float(p[1]), 1) for p in keypoints_np]
+        # gray= cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        # sift = cv2.SIFT_create()
+        # self.present_predictions['keypoints'], self.present_predictions['descriptors'] = sift.detectAndCompute(gray,None)
+
         if self.matching_type == "bf":      
             m_kp1, m_kp2 = self.match_descriptors_bf()
             H, inliers = self.compute_homography(m_kp1, m_kp2)

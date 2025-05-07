@@ -14,7 +14,7 @@ from pathlib import Path
 import os
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 start = 0
-end = 50
+end = 300
 
 def plot_trajectory(
     pred_traj, gt_traj=None, title="", filename="", align=True, correct_scale=True
@@ -64,7 +64,7 @@ def corect_trajectory(groundtruth, quaternions, timestamps, scene):
         correct_scale=False,
     )
 
-def compute_sequence(data_folder, t_gt, start_r, matching_type):
+def compute_sequence(image_folder, t_gt, start_r, matching_type, database='tum'):
     pre_times = []
     net_times = []
     post_times = []
@@ -72,14 +72,20 @@ def compute_sequence(data_folder, t_gt, start_r, matching_type):
     all_times = []
     matches_list = []
 
-    image_folder = data_folder + r"\rgb"
-
     image_files = sorted(
         [f for f in os.listdir(image_folder) if f.endswith((".png", ".jpg", ".ppm"))]
     )
     lenght = len(image_files)
-
-    camera = processing.PinholeCamera(517.3, 516.5, 318.6, 255.3, 0.2624, -0.9531, -0.0054,	0.0026,	1.1633)
+    if database == 'tum':
+        camera = processing.PinholeCamera(517.3, 516.5, 318.6, 255.3, 0.2624, -0.9531, -0.0054,	0.0026,	1.1633)
+    if database == "kitti":
+        camera = processing.PinholeCamera(
+            fx=707.0912,
+            fy=707.0912,
+            cx=601.8873,
+            cy=183.1104,
+            d0=0.0, d1=0.0, d2=0.0, d3=0.0, d4=0.0  # brak danych o dystorsji w P
+        )
     # camera = processing.PinholeCamera(520.9, 521.0, 325.1, 249.7, 0.2312, -0.7849, -0.0033, -0.0001, 0.9172)
     K_l = np.array([camera.fx, 0.0, camera.cx, 0.0, camera.fy, camera.cy, 0.0, 0.0, 1.0]).reshape(3, 3)
 
@@ -93,12 +99,16 @@ def compute_sequence(data_folder, t_gt, start_r, matching_type):
     start_R = r.as_matrix()
 
     first_image = cv2.imread(os.path.join(image_folder, image_files[start]))
-    image_size = (first_image.shape[1], first_image.shape[0])
-    first_image = cv2.resize(first_image, (image_size[0] + 32, image_size[1] + 16))
-    first_image = cv2.undistort(first_image, K_l, camera.d)
-    first_image = first_image[8:-8, 16:-16, :]
+    image_size = (int(first_image.shape[1]), int(first_image.shape[0]))
+    image_size = (640, 200)
+    if database == "tum":
+        first_image = cv2.resize(first_image, (image_size[0] + 32, image_size[1] + 16))
+        first_image = cv2.undistort(first_image, K_l, camera.d) 
+        first_image = first_image[8:-8, 16:-16, :]
+    else:
+        first_image = cv2.resize(first_image, image_size)
 
-    odometry = processing.VisualOdometry(image_size, start_R, t_start, camera, matching_type)
+    odometry = processing.VisualOdometry(image_size, start_R, t_start, camera, matching_type, database)
     odometry.compute_first_image(first_image)
     for i in range(start+1, end):
         print(f"Processing: {(i-(start+1))/(end-start+1) * 100}%")
@@ -208,17 +218,34 @@ def angular_mae(gt_angles_deg, est_angles_deg):
     mae_deg = np.degrees(mae_rad)
     return mae_deg
 
-scene = "rgbd_dataset_freiburg1_floor"
-file = "data//" + scene
-gt_t, gt_euler, time_array = get_gt(start, end, file)
-trajectory, est_euler = compute_sequence(file, gt_t, gt_euler[0], "SuperGlue")
-quaternions = R.from_euler("zyx", est_euler, degrees=True).as_quat()
-groundtruth = file + r"\groundtruth.txt"
-corect_trajectory(groundtruth, quaternions, time_array, scene)
+scene = "00"
+database = 'kitti'
+if database == 'tum':       
+    file = "data//" + scene
+    gt_t, gt_euler, time_array = get_gt(start, end, file)
+    file += r"\rgb"
+if database == 'kitti':
+    groundtruth = "data//dataset//poses//" + f"{scene}.txt"
+    pose = file_interface.read_kitti_poses_file(groundtruth)
+    gt_t = pose.positions_xyz[start:end]
+    quaternions = pose.orientations_quat_wxyz[start:end]
+    quats_xyzw = quaternions[:, [1, 2, 3, 0]]
+
+    gt_rot = R.from_quat(quats_xyzw)  # scipy używa kolejności: x, y, z, w
+    gt_euler = gt_rot.as_euler('zyx', degrees=True)  # yaw, pitch, roll
+    file = 'data//dataset//sequences//' + scene + "//image_0"
+    
+trajectory, est_euler = compute_sequence(file, gt_t, gt_euler[0], "bf", database)
+
+if database == 'tum':
+    quaternions = R.from_euler("zyx", est_euler, degrees=True).as_quat()
+    groundtruth = file + r"\groundtruth.txt"
+    corect_trajectory(groundtruth, quaternions, time_array, scene)
+    save_trajectory(trajectory, est_euler, time_array, "results/generated_trajectory.txt")
 
 tx_est, ty_est, tz_est = trajectory[:, 0], trajectory[:, 1], trajectory[:, 2]
 tx, ty, tz = gt_t[:, 0], gt_t[:, 1], gt_t[:, 2]
-save_trajectory(trajectory, est_euler, time_array, "results/generated_trajectory.txt")
+
 print("Średni błąd kąta:", angular_mae(gt_euler, est_euler), "stopni")
 print("RPE trajektorii:", trajectory_rpe(gt_t, trajectory))
 print(f"Norm APE trajektorii: {normalized_ape(gt_t, trajectory) * 100} %")
