@@ -32,10 +32,10 @@ class Feature_detection():
         """
         Preprocess raw image from camera or dataset.
         """
-        img = cv2.resize(image, self.image_size)
-        # img = cv2.resize(image, (self.image_size[0] + 32, self.image_size[1] + 16))
-        # img = cv2.undistort(img, self.K_l, self.d_l)
-        # img = img[8:-8, 16:-16, :]
+        # img = cv2.resize(image, self.image_size)
+        img = cv2.resize(image, (self.image_size[0] + 32, self.image_size[1] + 16))
+        img = cv2.undistort(img, self.K_l, self.d_l)
+        img = img[8:-8, 16:-16, :]
         self.input_image = img.copy()
         self.input = img.mean(-1) / 255
 

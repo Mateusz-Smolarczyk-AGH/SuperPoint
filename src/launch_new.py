@@ -1,18 +1,68 @@
 # /bin/python3
 
-import time
 from matplotlib import pyplot as plt
 import numpy as np
 import cv2
-import torch
 from scipy.spatial.transform import Rotation as R
-import superpoint_pytorch
 import processing
+from evo.core import sync
+from evo.core.metrics import PoseRelation
+from evo.core.trajectory import PoseTrajectory3D
+from evo.tools import file_interface, plot
+from pathlib import Path
 
 import os
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 start = 0
-end = 100
+end = 50
+
+def plot_trajectory(
+    pred_traj, gt_traj=None, title="", filename="", align=True, correct_scale=True
+):
+    assert isinstance(pred_traj, PoseTrajectory3D)
+
+    if gt_traj is not None:
+        assert isinstance(gt_traj, PoseTrajectory3D)
+        gt_traj, pred_traj = sync.associate_trajectories(gt_traj, pred_traj)
+
+        if align:
+            pred_traj.align(gt_traj, correct_scale=correct_scale)
+
+    plot_collection = plot.PlotCollection("PlotCol")
+    fig = plt.figure(figsize=(8, 8))
+    plot_mode = plot.PlotMode.xy  # ideal for planar movement
+    ax = plot.prepare_axis(fig, plot_mode)
+    ax.set_title(title)
+    if gt_traj is not None:
+        plot.traj(ax, plot_mode, gt_traj, "--", "gray", "Ground Truth")
+    plot.traj(ax, plot_mode, pred_traj, "-", "blue", "Predicted")
+    plot_collection.add_figure("traj (error)", fig)
+    plot_collection.export(filename, confirm_overwrite=False)
+    plt.close(fig=fig)
+    print(f"Saved {filename}")
+
+def corect_trajectory(groundtruth, quaternions, timestamps, scene):
+    traj_ref = file_interface.read_tum_trajectory_file(groundtruth)
+    traj_est = PoseTrajectory3D(
+            positions_xyz=trajectory[:, :3],
+            orientations_quat_wxyz=quaternions[:, [3, 0, 1, 2]],
+            timestamps=timestamps,
+        )
+    traj_ref, traj_est = sync.associate_trajectories(traj_ref, traj_est)
+
+    Path("saved_trajectories").mkdir(exist_ok=True)
+    file_interface.write_tum_trajectory_file(f"saved_trajectories/TUM_RGBD_{scene}_Trial{1:02d}_our_raw3.txt", traj_est)
+
+
+    Path("trajectory_plots").mkdir(exist_ok=True)
+    plot_trajectory(
+        traj_est,
+        traj_ref,
+        f"TUM-RGBD Frieburg1 {scene} Trial (ATE: {0:.03f})",
+        f"trajectory_plots/TUM_RGBD_Frieburg1_{scene}_Trial{1:02d}_our_raw3.pdf",
+        align=True,
+        correct_scale=False,
+    )
 
 def compute_sequence(data_folder, t_gt, start_r, matching_type):
     pre_times = []
@@ -45,9 +95,8 @@ def compute_sequence(data_folder, t_gt, start_r, matching_type):
     first_image = cv2.imread(os.path.join(image_folder, image_files[start]))
     image_size = (first_image.shape[1], first_image.shape[0])
     first_image = cv2.resize(first_image, (image_size[0] + 32, image_size[1] + 16))
-
-    # first_image = cv2.undistort(first_image, K_l, camera.d)
-    # first_image = first_image[8:-8, 16:-16, :]
+    first_image = cv2.undistort(first_image, K_l, camera.d)
+    first_image = first_image[8:-8, 16:-16, :]
 
     odometry = processing.VisualOdometry(image_size, start_R, t_start, camera, matching_type)
     odometry.compute_first_image(first_image)
@@ -102,7 +151,7 @@ def get_gt(start, end, file):
     gt_rot = R.from_quat(quaternions)  # scipy używa kolejności: x, y, z, w
     gt_euler = gt_rot.as_euler('zyx', degrees=True)  # yaw, pitch, roll
     t = matched_gt[:, 1:4]
-    return t, gt_euler, matched_gt[:,0]
+    return t, gt_euler, time_array
 
 def save_trajectory(t, euler_angles, time_array, output_file):
     # Upewnij się, że masz poprawne wymiary
@@ -159,10 +208,14 @@ def angular_mae(gt_angles_deg, est_angles_deg):
     mae_deg = np.degrees(mae_rad)
     return mae_deg
 
-
-file = r"data\rgbd_dataset_freiburg1_floor"
+scene = "rgbd_dataset_freiburg1_floor"
+file = "data//" + scene
 gt_t, gt_euler, time_array = get_gt(start, end, file)
 trajectory, est_euler = compute_sequence(file, gt_t, gt_euler[0], "SuperGlue")
+quaternions = R.from_euler("zyx", est_euler, degrees=True).as_quat()
+groundtruth = file + r"\groundtruth.txt"
+corect_trajectory(groundtruth, quaternions, time_array, scene)
+
 tx_est, ty_est, tz_est = trajectory[:, 0], trajectory[:, 1], trajectory[:, 2]
 tx, ty, tz = gt_t[:, 0], gt_t[:, 1], gt_t[:, 2]
 save_trajectory(trajectory, est_euler, time_array, "results/generated_trajectory.txt")
