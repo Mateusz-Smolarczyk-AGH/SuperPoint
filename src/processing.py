@@ -5,16 +5,17 @@ import superpoint_pytorch, superglue
 import os
 from scipy.spatial.transform import Rotation as R
 import time
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
+
 
 class PinholeCamera:
-	def __init__(self, fx, fy, cx, cy, 
-				d0=0.0, d1=0.0, d2=0.0, d3=0.0, d4=0.0):
-		self.fx = fx
-		self.fy = fy
-		self.cx = cx
-		self.cy = cy
-		self.d = np.array([d0, d1, d2, d3, d4])
+    def __init__(self, fx, fy, cx, cy, d0=0.0, d1=0.0, d2=0.0, d3=0.0, d4=0.0):
+        self.fx = fx
+        self.fy = fy
+        self.cx = cx
+        self.cy = cy
+        self.d = np.array([d0, d1, d2, d3, d4])
 
 class Feature_detection():
     def __init__(self, image_size, camera):
@@ -22,8 +23,12 @@ class Feature_detection():
         self.input = None
         # self.model = superpoint_pytorch.SuperPoint_short(detection_threshold=0.005, nms_radius=5).eval()
         # self.model.load_state_dict(torch.load("weights/superpoint_v6_from_tf.pth"))
-        self.model = superpoint_pytorch.SuperPointNet(detection_threshold=0.005, nms_radius=5).eval()
-        self.model.load_state_dict(torch.load("weights/superpoint_v1.pth"))
+        self.model = superpoint_pytorch.SuperPointNet(
+            detection_threshold=0.005, nms_radius=5
+        ).eval()
+        if weight_path is not None:
+            self.model.load_state_dict(torch.load(weight_path))
+
         self.image_size = image_size
         self.K_l = np.array([camera.fx, 0.0, camera.cx, 0.0, camera.fy, camera.cy, 0.0, 0.0, 1.0]).reshape(3, 3)
         self.d_l = camera.d
@@ -39,7 +44,7 @@ class Feature_detection():
         self.input_image = img.copy()
         self.input = img.mean(-1) / 255
 
-    def process_Superpoint(self) -> None:
+    def process_Superpoint(self) -> tuple:
         """
         Process NN and short post processing.
         """
@@ -83,7 +88,7 @@ class Feature_detection():
         # Convert (i, j) to (x, y)
         keypoints_all = torch.stack(idxs[-2:], dim=-1).flip(1).float()
         scores_all = scores[idxs]
-        keypoints = []  
+        keypoints = []
         scores = []
         descriptors = []
         for i in range(b):
@@ -94,8 +99,12 @@ class Feature_detection():
                 k = keypoints_all
                 s = scores_all
             if conf.max_num_keypoints is not None:
-                k, s = superpoint_pytorch.select_top_k_keypoints(k, s, conf.max_num_keypoints)
-            d = superpoint_pytorch.sample_descriptors(k[None], descriptors_dense[i, None], 2 ** (len(conf.channels) - 2))
+                k, s = superpoint_pytorch.select_top_k_keypoints(
+                    k, s, conf.max_num_keypoints
+                )
+            d = superpoint_pytorch.sample_descriptors(
+                k[None], descriptors_dense[i, None], 2 ** (len(conf.channels) - 2)
+            )
             keypoints.append(k)
             scores.append(s)
             descriptors.append(d.squeeze(0).transpose(0, 1))
@@ -119,15 +128,17 @@ class VisualOdometry():
         self.feature_detection = Feature_detection(image_size, cam)
         self.R_total = np.eye(3)
         self.start_R = start_R
-        self.t_total = np.zeros((3,1))
+        self.t_total = np.zeros((3, 1))
         self.start_t = start_t
         self.focal = cam.fx
         self.pp = (cam.cx, cam.cy)
-        self.K = np.array([[cam.fx, 0, cam.cx], [0, cam.fy, cam.cy], [0, 0, 1]])
+        self.K = np.array(
+            [[cam.fx, 0.0, cam.cx], [0.0, cam.fy, cam.cy], [0.0, 0.0, 1.0]]
+        )
         self.d = cam.d
         self.trajectory = [self.start_t.flatten().tolist()]
         r = R.from_matrix(start_R)
-        angles = r.as_euler('zyx', degrees=True)  # yaw, pitch, roll
+        angles = r.as_euler("zyx", degrees=True)  # yaw, pitch, roll
         self.R_list = [angles]
         self.matching_type = matching_type
         if matching_type == "SuperGlue":
@@ -190,9 +201,7 @@ class VisualOdometry():
             matched_pts2 = matched_kp2
 
         # Estimate the homography between the matches using RANSAC
-        H, inliers = cv2.findHomography(matched_pts1,
-                                        matched_pts2,
-                                        cv2.RANSAC)
+        H, inliers = cv2.findHomography(matched_pts1, matched_pts2, cv2.RANSAC)
         inliers = inliers.flatten()
         return H, inliers
     
@@ -283,7 +292,7 @@ class VisualOdometry():
         result = self.pose_estimation(pts1, pts2, abs_scale)
         r_global = self.start_R.dot(self.R_total)
         r = R.from_matrix(r_global)
-        angles = r.as_euler('zyx', degrees=True)  # yaw, pitch, roll
+        angles = r.as_euler("zyx", degrees=True)  # yaw, pitch, roll
         self.R_list.append(angles)
         # trac = self.t_total + self.start_t
         trac = self.start_R.dot(self.t_total) + self.start_t

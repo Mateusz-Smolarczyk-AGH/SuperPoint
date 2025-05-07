@@ -24,7 +24,7 @@ from evo.tools import file_interface, plot
 
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 start = 30
-end = 50
+end = 200
 
 
 def plot_trajectory(
@@ -152,11 +152,12 @@ def get_gt(start, end, file):
 if __name__ == "__main__":
 
     ### Main configuration ###
-    dataset_dir = os.path.join("data")
+    main_dir = "/uczelnia/Repositorium/superpoint-fpga"
+    dataset_dir = os.path.join(main_dir, "SuperPoint/data")
     dataset_dir = Path(dataset_dir)
 
     weight_path = (
-        "/weights/superpoint_v1.pth"
+        "/uczelnia/Repositorium/superpoint-fpga/SuperPoint/weights/superpoint_v1.pth"
     )
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -224,7 +225,8 @@ if __name__ == "__main__":
 
     image_size = (first_image.shape[1], first_image.shape[0])
     odometry = processing.VisualOdometry(
-        image_size, start_R, t_start, camera_matrix)
+        image_size, start_R, t_start, camera_matrix, weight_path
+    )
     odometry.compute_first_image(first_image)
     timestamps = []
 
@@ -256,7 +258,8 @@ if __name__ == "__main__":
 
         skip_frame, time = odometry.compute_pipeline(image)
         if skip_frame == 0:
-            odometry.past_predictions = odometry.present_predictions.copy()
+            odometry.keypoints["past"] = odometry.keypoints["present"]
+            odometry.descriptors["past"] = odometry.descriptors["present"]
 
         # cv2.imshow("Film", odometry.feature_detection.input_image)
 
