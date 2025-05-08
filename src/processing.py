@@ -8,6 +8,18 @@ import time
 
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 
+def crop_center(image, target_size):
+    h, w = image.shape[:2]
+    new_w, new_h = target_size
+
+    # Oblicz przesunięcia
+    x_start = (w - new_w) // 2
+    y_start = (h - new_h) // 2
+
+    # Wytnij wycinek
+    cropped = image[y_start:y_start + new_h, x_start:x_start + new_w]
+    return cropped, (x_start, y_start)
+
 
 class PinholeCamera:
     def __init__(self, fx, fy, cx, cy, d0=0.0, d1=0.0, d2=0.0, d3=0.0, d4=0.0):
@@ -41,6 +53,8 @@ class Feature_detection():
             img = cv2.undistort(img, self.K_l, self.d_l)
             img = img[8:-8, 16:-16, :]
         else:
+            # img, offset = crop_center(img, self.image_size)
+
             img = cv2.resize(img, self.image_size)
 
         self.input_image = img.copy()

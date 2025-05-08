@@ -6,15 +6,14 @@ import cv2
 from scipy.spatial.transform import Rotation as R
 import processing
 from evo.core import sync
-from evo.core.metrics import PoseRelation
-from evo.core.trajectory import PoseTrajectory3D
+from evo.core.metrics import PoseRelation, APE, RPE
+from evo.core.trajectory import PoseTrajectory3D, PosePath3D
 from evo.tools import file_interface, plot
 from pathlib import Path
+from evo.core.units import Unit
 
 import os
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
-start = 0
-end = 300
 
 def plot_trajectory(
     pred_traj, gt_traj=None, title="", filename="", align=True, correct_scale=True
@@ -41,7 +40,7 @@ def plot_trajectory(
     plt.close(fig=fig)
     print(f"Saved {filename}")
 
-def corect_trajectory(groundtruth, quaternions, timestamps, scene):
+def corect_trajectory(groundtruth, quaternions, timestamps, scene, trajectory):
     traj_ref = file_interface.read_tum_trajectory_file(groundtruth)
     traj_est = PoseTrajectory3D(
             positions_xyz=trajectory[:, :3],
@@ -99,8 +98,18 @@ def compute_sequence(image_folder, t_gt, start_r, matching_type, database='tum')
     start_R = r.as_matrix()
 
     first_image = cv2.imread(os.path.join(image_folder, image_files[start]))
-    image_size = (int(first_image.shape[1]), int(first_image.shape[0]))
-    image_size = (640, 200)
+    # image_size = (first_image.shape[1], first_image.shape[0])
+    image_size = (416, 128)
+    # first_image, offset = processing.crop_center(first_image, image_size)
+    # camera.cx=camera.cx - offset[0]
+    # camera.cy=camera.cy - offset[1]
+    scale_x = image_size[0] / first_image.shape[1]
+    scale_y = image_size[1] / first_image.shape[0]
+
+    camera.fx = camera.fx * scale_x
+    camera.fy = camera.fy * scale_y
+    camera.cx = camera.cx * scale_x
+    camera.cy = camera.cy * scale_y
     if database == "tum":
         first_image = cv2.resize(first_image, (image_size[0] + 32, image_size[1] + 16))
         first_image = cv2.undistort(first_image, K_l, camera.d) 
@@ -218,82 +227,155 @@ def angular_mae(gt_angles_deg, est_angles_deg):
     mae_deg = np.degrees(mae_rad)
     return mae_deg
 
-scene = "00"
-database = 'kitti'
-if database == 'tum':       
-    file = "data//" + scene
-    gt_t, gt_euler, time_array = get_gt(start, end, file)
-    file += r"\rgb"
-if database == 'kitti':
+def plot_result(trajectory, gt_t, est_euler, gt_euler):    
+    tx_est, ty_est, tz_est = trajectory[:, 0], trajectory[:, 1], trajectory[:, 2]
+    tx, ty, tz = gt_t[:, 0], gt_t[:, 1], gt_t[:, 2]
+
+    print("Średni błąd kąta:", angular_mae(gt_euler, est_euler), "stopni")
+    print("RPE trajektorii:", trajectory_rpe(gt_t, trajectory))
+    print(f"Norm APE trajektorii: {normalized_ape(gt_t, trajectory) * 100} %")
+
+    # Wykres 3D
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection='3d')
+    ax.plot(tx_est, ty_est, tz_est, label='Trajektoria estymowana', color='red')
+    ax.plot(tx, ty, tz, label='Trajektoria GT', color='blue')
+
+    ax.scatter(tx_est[0], ty_est[0], tz_est[0], color='black', marker='o', s=50, label='Punkt startowy')
+    ax.set_xlabel("X")
+    ax.set_ylabel("Y")
+    ax.set_zlabel("Z")
+    ax.set_title("Trajektoria estymowana")
+    x_limits = ax.get_xlim3d()
+    y_limits = ax.get_ylim3d()
+    z_limits = ax.get_zlim3d()
+
+    x_range = abs(x_limits[1] - x_limits[0])
+    y_range = abs(y_limits[1] - y_limits[0])
+    z_range = abs(z_limits[1] - z_limits[0])
+
+    max_range = max(x_range, y_range, z_range)
+
+    # wyśrodkuj osie
+    mid_x = np.mean(x_limits)
+    mid_y = np.mean(y_limits)
+    mid_z = np.mean(z_limits)
+
+    ax.set_xlim(mid_x - max_range/2, mid_x + max_range/2)
+    ax.set_ylim(mid_y - max_range/2, mid_y + max_range/2)
+    ax.set_zlim(mid_z - max_range/2, mid_z + max_range/2)
+    ax.legend()
+
+    plt.figure(figsize=(12, 6))
+
+    labels = ['Yaw (Z)', 'Pitch (Y)', 'Roll (X)']
+    for i in range(3):
+        plt.subplot(3, 1, i + 1)
+        plt.plot(est_euler[:, i], label='Estymowane')
+        plt.plot(gt_euler[:, i], label='Ground Truth', linestyle='--')
+
+        plt.ylabel(labels[i])
+        plt.legend()
+        plt.grid(True)
+
+    plt.xlabel('Krok czasowy')
+    plt.suptitle("Porównanie kątów Eulera kamery (Estymacja vs GT)")
+    plt.tight_layout()
+    plt.show()
+
+def save_trajectory_with_euler(filename, positions, euler_angles):
+    """
+    Zapisuje trajektorię i kąty Eulera do pliku tekstowego.
+    
+    :param filename: Ścieżka do pliku wyjściowego
+    :param positions: ndarray (N, 3), pozycje w metrach
+    :param euler_angles: ndarray (N, 3), kąty Eulera (rad lub deg)
+    :param degrees: jeśli True, zapisuje kąty w stopniach
+    """
+    # Łączymy dane w jedną macierz: [x y z roll pitch yaw]
+    data = np.hstack((positions, euler_angles))
+
+    # Zapis do pliku z nagłówkiem
+    header = "x y z roll pitch yaw"
+    np.savetxt(filename, data, fmt="%.6f", delimiter=" ", header=header, comments='')
+
+    print(f"Zapisano do pliku: {filename}")
+
+def metrics(trajectory, est_euler, gt):
+    poses_se3 = []
+    gt_cut = PosePath3D(poses_se3=gt.poses_se3[start:end])
+
+    for pos, euler in zip(trajectory, est_euler):
+        rot = R.from_euler('xyz', euler).as_matrix()  # 3x3 macierz rotacji
+        T = np.eye(4)
+        T[:3, :3] = rot
+        T[:3, 3] = pos
+        poses_se3.append(T)
+    traj = PosePath3D(poses_se3=poses_se3)
+    ape_metric = APE(PoseRelation.translation_part)
+    ape_metric.process_data((gt_cut, traj))
+    ape_result = ape_metric.get_result()
+    print("ATE RMSE:", ape_result.stats["rmse"])
+
+    rpe_metric = RPE(PoseRelation.translation_part, delta=1, delta_unit=Unit.frames)
+    rpe_metric.process_data((gt_cut, traj))
+    print("RPE RMSE:", rpe_metric.get_result().stats['rmse'])
+
+def metrics_from_file(scene, database, start, end, comment):
+    data = np.loadtxt(f"results//{database}_{scene}_{start}_{end}_{comment}.txt", skiprows=1)
+    positions = data[:, 0:3]
+    euler_angles = data[:, 3:6]
     groundtruth = "data//dataset//poses//" + f"{scene}.txt"
     pose = file_interface.read_kitti_poses_file(groundtruth)
-    gt_t = pose.positions_xyz[start:end]
-    quaternions = pose.orientations_quat_wxyz[start:end]
-    quats_xyzw = quaternions[:, [1, 2, 3, 0]]
+    metrics(positions, euler_angles, pose)
+    poses = pose.positions_xyz[start:end]
+    length = 0
+    for i in range(1, len(poses)):
+        p1 = poses[i-1]  # pozycja xyz z macierzy 4x4
+        p2 = poses[i]
+        length += np.linalg.norm(p2 - p1)
+    print(f"Total Lenght: {length}")
+    print(f"Frames: {end-start}")
 
-    gt_rot = R.from_quat(quats_xyzw)  # scipy używa kolejności: x, y, z, w
-    gt_euler = gt_rot.as_euler('zyx', degrees=True)  # yaw, pitch, roll
-    file = 'data//dataset//sequences//' + scene + "//image_0"
-    
-trajectory, est_euler = compute_sequence(file, gt_t, gt_euler[0], "bf", database)
+def main(scene, database, start, end, comment):
+    if database == 'tum':       
+        file = "data//" + scene
+        gt_t, gt_euler, time_array = get_gt(start, end, file)
+        file += r"\rgb"
+    if database == 'kitti':
+        groundtruth = "data//dataset//poses//" + f"{scene}.txt"
+        pose = file_interface.read_kitti_poses_file(groundtruth)
+        gt_t = pose.positions_xyz[start:end]
+        quaternions = pose.orientations_quat_wxyz[start:end]
+        quats_xyzw = quaternions[:, [1, 2, 3, 0]]
 
-if database == 'tum':
-    quaternions = R.from_euler("zyx", est_euler, degrees=True).as_quat()
-    groundtruth = file + r"\groundtruth.txt"
-    corect_trajectory(groundtruth, quaternions, time_array, scene)
-    save_trajectory(trajectory, est_euler, time_array, "results/generated_trajectory.txt")
+        gt_rot = R.from_quat(quats_xyzw)  # scipy używa kolejności: x, y, z, w
+        gt_euler = gt_rot.as_euler('zyx', degrees=True)  # yaw, pitch, roll
+        file = 'data//dataset//sequences//' + scene + "//image_0"
+        
+    trajectory, est_euler = compute_sequence(file, gt_t, gt_euler[0], "SuperGlue", database)
 
-tx_est, ty_est, tz_est = trajectory[:, 0], trajectory[:, 1], trajectory[:, 2]
-tx, ty, tz = gt_t[:, 0], gt_t[:, 1], gt_t[:, 2]
+    if database == 'tum':
+        quaternions = R.from_euler("zyx", est_euler, degrees=True).as_quat()
+        groundtruth = file + r"\groundtruth.txt"
+        corect_trajectory(groundtruth, quaternions, time_array, scene)
+        save_trajectory(trajectory, est_euler, time_array, "results/generated_trajectory.txt")
+    if database == "kitti":
+        metrics(trajectory, est_euler, pose)
+    save_trajectory_with_euler(f"results//{database}_{scene}_{start}_{end}_{comment}.txt", trajectory, est_euler)
+    plot_result(trajectory, gt_t, est_euler, gt_euler)
+# scene = "00"
+# groundtruth = "data//dataset//poses//" + f"{scene}.txt"
 
-print("Średni błąd kąta:", angular_mae(gt_euler, est_euler), "stopni")
-print("RPE trajektorii:", trajectory_rpe(gt_t, trajectory))
-print(f"Norm APE trajektorii: {normalized_ape(gt_t, trajectory) * 100} %")
+# pose = file_interface.read_kitti_poses_file(groundtruth)
 
-# Wykres 3D
-fig = plt.figure()
-ax = fig.add_subplot(111, projection='3d')
-ax.plot(tx_est, ty_est, tz_est, label='Trajektoria estymowana', color='red')
-ax.plot(tx, ty, tz, label='Trajektoria GT', color='blue')
 
-ax.scatter(tx_est[0], ty_est[0], tz_est[0], color='black', marker='o', s=50, label='Punkt startowy')
-ax.set_xlabel("X")
-ax.set_ylabel("Y")
-ax.set_zlabel("Z")
-ax.set_title("Trajektoria estymowana")
-x_limits = ax.get_xlim3d()
-y_limits = ax.get_ylim3d()
-z_limits = ax.get_zlim3d()
 
-x_range = abs(x_limits[1] - x_limits[0])
-y_range = abs(y_limits[1] - y_limits[0])
-z_range = abs(z_limits[1] - z_limits[0])
-
-max_range = max(x_range, y_range, z_range)
-
-# wyśrodkuj osie
-mid_x = np.mean(x_limits)
-mid_y = np.mean(y_limits)
-mid_z = np.mean(z_limits)
-
-ax.set_xlim(mid_x - max_range/2, mid_x + max_range/2)
-ax.set_ylim(mid_y - max_range/2, mid_y + max_range/2)
-ax.set_zlim(mid_z - max_range/2, mid_z + max_range/2)
-ax.legend()
-
-plt.figure(figsize=(12, 6))
-
-labels = ['Yaw (Z)', 'Pitch (Y)', 'Roll (X)']
-for i in range(3):
-    plt.subplot(3, 1, i + 1)
-    plt.plot(est_euler[:, i], label='Estymowane')
-    plt.plot(gt_euler[:, i], label='Ground Truth', linestyle='--')
-
-    plt.ylabel(labels[i])
-    plt.legend()
-    plt.grid(True)
-
-plt.xlabel('Krok czasowy')
-plt.suptitle("Porównanie kątów Eulera kamery (Estymacja vs GT)")
-plt.tight_layout()
-plt.show()
+# print(length)
+scene = "00"
+database = 'kitti'
+start = 0
+end = 10
+comment = "416x128_SuperPoint_SuperGlue"
+# main(scene, database, start, end, comment)
+metrics_from_file(scene, database, start, end, comment)
