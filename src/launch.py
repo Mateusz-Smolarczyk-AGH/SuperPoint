@@ -21,6 +21,8 @@ from evo.core.metrics import PoseRelation
 from evo.core.trajectory import PoseTrajectory3D
 from evo.tools import file_interface, plot
 
+import argparse
+
 
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 start = 30
@@ -152,13 +154,34 @@ def get_gt(start, end, file):
 if __name__ == "__main__":
 
     ### Main configuration ###
-    main_dir = "/uczelnia/Repositorium/superpoint-fpga"
-    dataset_dir = os.path.join(main_dir, "SuperPoint/data")
-    dataset_dir = Path(dataset_dir)
-
-    weight_path = (
-        "/uczelnia/Repositorium/superpoint-fpga/SuperPoint/weights/superpoint_v1.pth"
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--maindir",
+        type=Path,
+        default="/uczelnia/Repositorium/superpoint-fpga/SuperPoint",
     )
+    parser.add_argument("--network", type=str, default="weights/superpoint_v1.pth")
+    parser.add_argument("--kittidir", type=Path, default="datasets/KITTI")
+    parser.add_argument("--kitti_seq", type=str, default="00")
+
+    parser.add_argument("--kitti_gt", type=Path, default="datasets/KITTI/poses/00.txt")
+
+    parser.add_argument(
+        "--tumdir",
+        type=Path,
+        default="/uczelnia/Repositorium/superpoint-fpga/SuperPoint/data",
+    )
+    parser.add_argument("--tum_seq", type=str, default="rgbd_dataset_freiburg1_floor")
+
+    parser.add_argument("--start", type=int, default=0)
+    parser.add_argument("--end", type=int, default=100)
+
+    parser.add_argument("--viz", action="store_true")
+    parser.add_argument("--show_img", action="store_true")
+
+    parser.add_argument("--plot", action="store_true")
+    parser.add_argument("--save_trajectory", action="store_true")
+    args = parser.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
@@ -174,22 +197,13 @@ if __name__ == "__main__":
     # "rgbd_dataset_freiburg1_teddy",
     # "rgbd_dataset_freiburg1_xyz",
     # ]
+    
+    superpoint_weights = args.maindir / args.network
 
-    scene = "rgbd_dataset_freiburg1_floor"
-    scene_dir = dataset_dir / f"{scene}"
+    scene_dir = args.tumdir / args.tum_seq
     groundtruth = scene_dir / "groundtruth.txt"
 
     traj_ref = file_interface.read_tum_trajectory_file(groundtruth)
-
-    # trajectory, est_euler = compute_sequence(
-    #     dataset_dir, (tx[0], ty[0], tz[0]), gt_euler[0], weight_path
-    # )
-
-    # traj_est = PoseTrajectory3D(
-    #     positions_xyz=traj_est[:, :3],
-    #     orientations_quat_wxyz=traj_est[:, [6, 3, 4, 5]],
-    #     timestamps=timestamps,
-    # )
 
     images_dir = scene_dir / "rgb"
 
@@ -225,7 +239,7 @@ if __name__ == "__main__":
 
     image_size = (first_image.shape[1], first_image.shape[0])
     odometry = processing.VisualOdometry(
-        image_size, start_R, t_start, camera_matrix, weight_path
+        image_size, start_R, t_start, camera_matrix, superpoint_weights=superpoint_weights
     )
     odometry.compute_first_image(first_image)
     timestamps = []
@@ -263,13 +277,9 @@ if __name__ == "__main__":
 
         # cv2.imshow("Film", odometry.feature_detection.input_image)
 
-         # Czekaj 30 ms na kolejny obraz (około 30 FPS)
+        # Czekaj 30 ms na kolejny obraz (około 30 FPS)
         if cv2.waitKey(1) & 0xFF == ord("q"):
             break
-
-        # il += 1
-        # if il > 100:
-        #     break
 
     trajectory = np.array(odometry.trajectory)
     est_euler = np.array(odometry.R_list)
@@ -288,19 +298,24 @@ if __name__ == "__main__":
 
     traj_ref, traj_est = sync.associate_trajectories(traj_ref, traj_est)
 
-    Path("saved_trajectories").mkdir(exist_ok=True)
-    file_interface.write_tum_trajectory_file(f"saved_trajectories/TUM_RGBD_{scene}_Trial{1:02d}_our_raw3.txt", traj_est)
 
+    if args.save_trajectory:
+        # Save trajectory to a text file
+        Path("saved_trajectories").mkdir(exist_ok=True)
+        file_interface.write_tum_trajectory_file(
+            f"saved_trajectories/TUM_RGBD_{args.tum_seq}_Trial{1:02d}_our_raw3.txt", traj_est
+        )
 
-    Path("trajectory_plots").mkdir(exist_ok=True)
-    plot_trajectory(
-        traj_est,
-        traj_ref,
-        f"TUM-RGBD Frieburg1 {scene} Trial (ATE: {0:.03f})",
-        f"trajectory_plots/TUM_RGBD_Frieburg1_{scene}_Trial{1:02d}_our_raw3.pdf",
-        align=False,
-        correct_scale=False,
-    )
+    if args.plot:
+        Path("trajectory_plots").mkdir(exist_ok=True)
+        plot_trajectory(
+            traj_est,
+            traj_ref,
+            f"TUM-RGBD Frieburg1 {args.scene} Trial (ATE: {0:.03f})",
+            f"trajectory_plots/TUM_RGBD_Frieburg1_{args.scene}_Trial{1:02d}_our_raw3.pdf",
+            align=False,
+            correct_scale=False,
+        )
 
     # # Save trajectory to a text file
     # output_file = os.path.join(main_dir, "estimated_trajectory.txt")
