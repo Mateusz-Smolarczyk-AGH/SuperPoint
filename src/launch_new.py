@@ -16,6 +16,7 @@ import os
 from pathlib import Path
 import argparse
 import torch
+from tqdm import tqdm
 
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 
@@ -72,7 +73,13 @@ def corect_trajectory(groundtruth, quaternions, timestamps, scene, trajectory):
 
 
 def compute_sequence(
-    image_folder, t_gt, start_r, matching_type, database="tum", args=None
+    image_folder,
+    t_gt,
+    start_r,
+    matching_type,
+    database="tum",
+    args=None,
+    depth_image_folder=None,
 ):
     pre_times = []
     net_times = []
@@ -84,7 +91,16 @@ def compute_sequence(
     image_files = sorted(
         [f for f in os.listdir(image_folder) if f.endswith((".png", ".jpg", ".ppm"))]
     )
-    lenght = len(image_files)
+
+    if depth_image_folder is not None and args.vo_type == "rgbd":
+        depth_image_files = sorted(
+            [
+                f
+                for f in os.listdir(depth_image_folder)
+                if f.endswith((".png", ".jpg", ".ppm"))
+            ]
+        )
+
     if database == "tum":
         camera = processing.PinholeCamera(
             517.3, 516.5, 318.6, 255.3, 0.2624, -0.9531, -0.0054, 0.0026, 1.1633
@@ -114,8 +130,19 @@ def compute_sequence(
     start_R = r.as_matrix()
 
     first_image = cv2.imread(os.path.join(image_folder, image_files[args.start]))
-    # image_size = (first_image.shape[1], first_image.shape[0])
-    image_size = (416, 128)
+
+    first_depth_image = None
+    if depth_image_folder is not None and args.vo_type == "rgbd":
+        first_depth_image = cv2.imread(
+            os.path.join(depth_image_folder, depth_image_files[args.start]),
+            cv2.IMREAD_UNCHANGED,
+        )
+        cv2.imshow("Depth", first_depth_image)
+
+        # first_image = processing.depth_to_rgb(depth_image)
+        # first_image = cv2.resize(first_image, (first_image.shape[1], first_image.shape[0]))
+    image_size = (first_image.shape[1], first_image.shape[0])
+    # image_size = (416, 128)
     # first_image, offset = processing.crop_center(first_image, image_size)
     # camera.cx=camera.cx - offset[0]
     # camera.cy=camera.cy - offset[1]
@@ -126,6 +153,7 @@ def compute_sequence(
     camera.fy = camera.fy * scale_y
     camera.cx = camera.cx * scale_x
     camera.cy = camera.cy * scale_y
+
     if database == "tum":
         first_image = cv2.resize(first_image, (image_size[0] + 32, image_size[1] + 16))
         first_image = cv2.undistort(first_image, K_l, camera.d)
@@ -134,6 +162,7 @@ def compute_sequence(
         first_image = cv2.resize(first_image, image_size)
 
     odometry = processing.VisualOdometry(
+        args,
         image_size,
         start_R,
         t_start,
@@ -143,28 +172,45 @@ def compute_sequence(
         superpoint_weights=args.maindir / args.network,
         superglue_weights=args.maindir / args.superglue_weights,
     )
-    odometry.compute_first_image(first_image)
-    for i in range(args.start + 1, args.end):
-        print(f"Processing: {(i-(args.start+1))/(args.end-args.start+1) * 100}%")
+
+    odometry.compute_first_image(first_image, first_depth_image)
+
+    depth_image = None
+    for i in tqdm(range(args.start + 1, args.end)):
+        # print(f"Processing: {(i-(args.start+1))/(args.end-args.start+1) * 100}%")
         image_file = image_files[i]
         image_path = os.path.join(image_folder, image_file)
         image = cv2.imread(image_path)
+
+        if args.vo_type == "rgbd":
+            depth_image = cv2.imread(
+                os.path.join(depth_image_folder, depth_image_files[i]),
+                cv2.IMREAD_UNCHANGED,
+            )
+
+            cv2.imshow("Depth", depth_image)
+
         skip_frame, time = odometry.compute_pipeline(
-            image, t_gt[i - args.start], t_gt[i - args.start - 1]
+            image, t_gt[i - args.start], t_gt[i - args.start - 1], depth_image
         )
         if skip_frame == 0:
             odometry.past_predictions = odometry.present_predictions.copy()
 
+            if args.vo_type == "rgbd":
+                odometry.past_depth = odometry.present_depth.copy()
+
         cv2.imshow("Film", odometry.feature_detection.input_image)
 
         # Czekaj 30 ms na kolejny obraz (około 30 FPS)
-        if cv2.waitKey(30) & 0xFF == ord("q"):
+        if cv2.waitKey(1) & 0xFF == ord("q"):
             break
+
         pre_times.append(time[0])
         net_times.append(time[1])
         post_times.append(time[2])
         matching_times.append(time[3])
         matches_list.append(time[4])
+
     num_iterations = len(pre_times) - 1
     avg_pre = sum(pre_times[1:]) / num_iterations * 1000
     avg_net = sum(net_times[1:]) / num_iterations * 1000
@@ -406,6 +452,12 @@ if __name__ == "__main__":
         type=Path,
         default="/uczelnia/Repositorium/superpoint-fpga/SuperPoint",
     )
+    parser.add_argument(
+        "--superglue_weights", type=str, default="weights/superglue_indoor.pth"
+    )
+
+    parser.add_argument("--vo_type", type=str, default="rgb")  # [rgb, rgbd]
+    parser.add_argument("--database", type=str, default="tum")  # [tum, kitti]
     parser.add_argument("--network", type=str, default="weights/superpoint_v1.pth")
     parser.add_argument(
         "--kittidir",
@@ -413,26 +465,18 @@ if __name__ == "__main__":
         default="/uczelnia/Repositorium/superpoint-fpga/data_odometry_color/dataset",
     )
     parser.add_argument(
-        "--superglue_weights", type=str, default="weights/superglue_indoor.pth"
-    )
-    parser.add_argument("--kitti_seq", type=str, default="00")
-
-    parser.add_argument("--kitti_gt", type=Path, default="datasets/KITTI/poses/00.txt")
-
-    parser.add_argument(
         "--tumdir",
         type=Path,
         default="/uczelnia/Repositorium/superpoint-fpga/SuperPoint/data",
     )
+    
     parser.add_argument("--tum_seq", type=str, default="rgbd_dataset_freiburg1_floor")
-
-    parser.add_argument("--database", type=str, default="tum")
+    parser.add_argument("--kitti_seq", type=str, default="00")
+    parser.add_argument("--kitti_gt", type=Path, default="datasets/KITTI/poses/00.txt")
     parser.add_argument("--start", type=int, default=0)
     parser.add_argument("--end", type=int, default=100)
-
     parser.add_argument("--viz", action="store_true", default=True)
     parser.add_argument("--show_img", action="store_true")
-
     parser.add_argument("--plot", action="store_true")
     parser.add_argument("--save_trajectory", action="store_true")
     args = parser.parse_args()
@@ -456,10 +500,16 @@ if __name__ == "__main__":
 
         gt_rot = R.from_quat(quats_xyzw)  # scipy używa kolejności: x, y, z, w
         gt_euler = gt_rot.as_euler("zyx", degrees=True)  # yaw, pitch, roll
-        file = args.kittidir / "sequences" / args.kitti_seq / "image_2"
+        file_image = args.kittidir / "sequences" / args.kitti_seq / "image_2"
 
     trajectory, est_euler = compute_sequence(
-        file_image, gt_t, gt_euler[0], "SuperGlue", args.database, args=args
+        file_image,
+        gt_t,
+        gt_euler[0],
+        "SuperGlue",
+        args.database,
+        args=args,
+        depth_image_folder=file / "depth" if args.database == "tum" else None,
     )
 
     if args.database == "tum":
@@ -475,7 +525,7 @@ if __name__ == "__main__":
             args.maindir / "results/generated_trajectory.txt",
         )
     if args.database == "kitti":
-        metrics(trajectory, est_euler, pose)
+        metrics(trajectory, est_euler, pose, args)
     save_trajectory_with_euler(
         args.maindir
         / f"results/{args.database}_{args.kitti_seq}_{args.start}_{args.end}_{comment}.txt",
@@ -485,6 +535,5 @@ if __name__ == "__main__":
     if args.viz:
         plot_result(trajectory, gt_t, est_euler, gt_euler)
 
-
-# main(scene, database, start, end, comment)
-metrics_from_file(args.kittidir / "poses" / f"{args.kitti_seq}.txt", comment, args)
+if args.database == "kitti":
+    metrics_from_file(args.kittidir / "poses" / f"{args.kitti_seq}.txt", comment, args)

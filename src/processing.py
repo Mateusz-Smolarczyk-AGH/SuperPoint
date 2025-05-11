@@ -139,6 +139,7 @@ class Feature_detection:
 class VisualOdometry:
     def __init__(
         self,
+        config,
         image_size,
         start_R,
         start_t,
@@ -153,6 +154,12 @@ class VisualOdometry:
 
         # self.descriptors = {"past": None,
         #                   "present": None}
+
+        self.args = config
+        # depth
+        self.past_depth = None
+        self.present_depth = None
+
         self.past_predictions = {}
         self.present_predictions = {}
         self.matches = None
@@ -202,6 +209,7 @@ class VisualOdometry:
             self.past_predictions["descriptors"],
             self.present_predictions["descriptors"],
         )
+
         # self.matches = sorted(self.matches, key = lambda x:x.distance)
         # if len(self.matches) > 200:
         #     self.matches = self.matches[:200]
@@ -260,6 +268,10 @@ class VisualOdometry:
         for pt1, pt2 in zip(points_from, points_to):
             pt1 = tuple(map(int, pt1))
             pt2 = tuple(map(int, pt2))
+
+            # draw points
+            cv2.circle(self.feature_detection.input_image, pt1, 3, (0, 0, 0), -1)
+            cv2.circle(self.feature_detection.input_image, pt2, 3, (255, 255, 255), -1)
             cv2.arrowedLine(
                 self.feature_detection.input_image,
                 pt1,
@@ -287,23 +299,68 @@ class VisualOdometry:
         #         best_num_inliers = n
         #         R_diff, t = R_temp, t_temp
         #         # ret = (R, t[:, 0], mask.ravel() > 0)
-        points, R_diff, t, mask = cv2.recoverPose(
-            E,
-            points2[mask.ravel().astype(bool)],
-            points1[mask.ravel().astype(bool)],
-            focal=self.focal,
-            pp=self.pp,
-        )
+
+        if self.args.vo_type == "rgb":
+            points, R_diff, t, mask = cv2.recoverPose(
+                E,
+                points2[mask.ravel().astype(bool)],
+                points1[mask.ravel().astype(bool)],
+                focal=self.focal,
+                pp=self.pp,
+            )
+
+        if self.args.vo_type == "rgbd":
+            pts2d, pts3d = self.depth_estimation(points1, points2)
+
+            success, rvec, tvec, inliers = cv2.solvePnPRansac(
+                pts3d, pts2d, self.K, None
+            )
+            R_3d, _ = cv2.Rodrigues(rvec)
+
+            # Dane z solvePnPRansac (R_cam, t_cam): świat → kamera
+            R_rel = R_3d
+            t_rel = tvec.reshape(3, 1)
+
+            # Odwrócenie transformacji: kamera → świat
+            R_rel_inv = R_rel.T
+            t_rel_inv = -R_rel_inv @ t_rel
+
+            R_diff = R_rel_inv
+            t = t_rel_inv
+
+            abs_scale = 1
 
         angles_change = R.from_matrix(R_diff).as_euler("zyx", degrees=True)
         if np.any(np.abs(angles_change) > 15):
             return 1
-        # abs_scale  = 1
+
         self.t_total = self.t_total + abs_scale * self.R_total.dot(t)
         self.R_total = self.R_total.dot(R_diff)
         return 0
 
-    def compute_first_image(self, image):
+    def depth_estimation(self, kp1, kp2, factor=5000):
+
+        pts2d = []
+        pts3d = []
+        for p1, p2 in zip(kp1, kp2):
+            u, v = p1
+            d = self.past_depth[int(v), int(u)] / factor
+
+            if d == 0:
+                continue
+
+            x = (u - self.K[0, 2]) * d / self.K[0, 0]
+            y = (v - self.K[1, 2]) * d / self.K[1, 1]
+
+            pts3d.append([x, y, d])
+            pts2d.append(p2)
+
+        pts3d = np.array(pts3d, dtype=np.float32).reshape(-1, 1, 3)
+        pts2d = np.array(pts2d, dtype=np.float32).reshape(-1, 1, 2)
+
+        return pts2d, pts3d
+
+    def compute_first_image(self, image, depth_image=None):
         self.feature_detection.get_input(image)
         self.past_predictions["raw"], _, _ = self.feature_detection.process_Superpoint()
         self.past_predictions["descriptors"] = (
@@ -318,11 +375,15 @@ class VisualOdometry:
         self.past_predictions["keypoints"] = [
             cv2.KeyPoint(float(p[0]), float(p[1]), 1) for p in keypoints_np
         ]
+
+        if depth_image is not None and self.args.vo_type == "rgbd":
+            self.past_depth = depth_image
+
         # gray= cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         # sift = cv2.SIFT_create()
         # self.past_predictions['keypoints'], self.past_predictions['descriptors'] = sift.detectAndCompute(gray,None)
 
-    def compute_pipeline(self, image, pos_cur=None, pos_prev=None):
+    def compute_pipeline(self, image, pos_cur=None, pos_prev=None, depth_image=None):
         start = time.perf_counter()
         # preprocessing
         self.feature_detection.get_input(image)
@@ -350,6 +411,9 @@ class VisualOdometry:
         # gray= cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         # sift = cv2.SIFT_create()
         # self.present_predictions['keypoints'], self.present_predictions['descriptors'] = sift.detectAndCompute(gray,None)
+
+        if depth_image is not None and self.args.vo_type == "rgbd":
+            self.present_depth = depth_image
 
         if self.matching_type == "bf":
             m_kp1, m_kp2 = self.match_descriptors_bf()
@@ -380,12 +444,15 @@ class VisualOdometry:
             H, inliers = self.compute_homography(m_kp1, m_kp2)
             pts1 = m_kp1[inliers.astype(bool)]
             pts2 = m_kp2[inliers.astype(bool)]
+
         end = time.perf_counter()
         # pose estimation
         if pos_cur is None:
             abs_scale = 1
         else:
             abs_scale = np.linalg.norm(pos_cur - pos_prev)
+            # print("Scale: ", abs_scale)
+
         # abs_scale = np.sqrt((pos_cur[0] - pos_prev[0])*(pos_cur[0] - pos_prev[0]) + (pos_cur[1] - pos_prev[1])*(pos_cur[1] - pos_prev[1]) + (pos_cur[1] - pos_prev[1])*(pos_cur[1] - pos_prev[1]))
         result = self.pose_estimation(pts1, pts2, abs_scale)
         r_global = self.start_R.dot(self.R_total)
