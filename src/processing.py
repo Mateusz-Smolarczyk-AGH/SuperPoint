@@ -255,7 +255,11 @@ class VisualOdometry():
             return 1
         # abs_scale  = 1
         self.t_total = self.t_total + abs_scale*self.R_total.dot(t)
+        r_total_rr = R.from_matrix(self.R_total).as_euler('zyx', degrees=True)
+
         self.R_total = self.R_total.dot(R_diff)
+        r_total_rqqr = R.from_matrix(self.R_total).as_euler('zyx', degrees=True)
+
         return 0
 
     def compute_first_image(self, image):
@@ -265,7 +269,8 @@ class VisualOdometry():
         points_th = self.past_predictions['raw']['keypoints'][0]
         keypoints_np = np.array(points_th)
         self.past_predictions['keypoints'] = [cv2.KeyPoint(float(p[0]), float(p[1]), 1) for p in keypoints_np]
-        # gray= cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        # img = cv2.resize(image, self.feature_detection.image_size)
+        # gray= cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         # sift = cv2.SIFT_create()
         # self.past_predictions['keypoints'], self.past_predictions['descriptors'] = sift.detectAndCompute(gray,None)
 
@@ -284,7 +289,8 @@ class VisualOdometry():
         points_th = self.present_predictions['raw']['keypoints'][0]
         keypoints_np = np.array(points_th)
         self.present_predictions['keypoints'] = [cv2.KeyPoint(float(p[0]), float(p[1]), 1) for p in keypoints_np]
-        # gray= cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        # img = cv2.resize(image, self.feature_detection.image_size)
+        # gray= cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         # sift = cv2.SIFT_create()
         # self.present_predictions['keypoints'], self.present_predictions['descriptors'] = sift.detectAndCompute(gray,None)
 
@@ -322,6 +328,7 @@ class VisualOdometry():
         # trac = self.t_total + self.start_t
         trac = self.start_R.dot(self.t_total) + self.start_t
         self.trajectory.append(trac.flatten().tolist())
+        position_time = time.perf_counter()
         self.show_arrows(pts1, pts2)
         
-        return result, (pre-start, net, post, end-match, len(pts1))
+        return result, (pre-start, net, post, end-match, position_time - end, len(pts1))

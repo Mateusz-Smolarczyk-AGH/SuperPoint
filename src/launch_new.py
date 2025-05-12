@@ -11,7 +11,6 @@ from evo.core.trajectory import PoseTrajectory3D, PosePath3D
 from evo.tools import file_interface, plot
 from pathlib import Path
 from evo.core.units import Unit
-
 import os
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 
@@ -70,7 +69,7 @@ def compute_sequence(image_folder, t_gt, start_r, matching_type, database='tum')
     matching_times = []
     all_times = []
     matches_list = []
-
+    pos_times = []
     image_files = sorted(
         [f for f in os.listdir(image_folder) if f.endswith((".png", ".jpg", ".ppm"))]
     )
@@ -99,7 +98,7 @@ def compute_sequence(image_folder, t_gt, start_r, matching_type, database='tum')
 
     first_image = cv2.imread(os.path.join(image_folder, image_files[start]))
     # image_size = (first_image.shape[1], first_image.shape[0])
-    image_size = (416, 128)
+    image_size = (1241, 376)
     # first_image, offset = processing.crop_center(first_image, image_size)
     # camera.cx=camera.cx - offset[0]
     # camera.cy=camera.cy - offset[1]
@@ -136,16 +135,21 @@ def compute_sequence(image_folder, t_gt, start_r, matching_type, database='tum')
         net_times.append(time[1])
         post_times.append(time[2])
         matching_times.append(time[3])
-        matches_list.append(time[4])
+        pos_times.append(time[4])
+
+        matches_list.append(time[5])
+        all_times.append(time[0] + time[1] + time[2] + time[3] + time[4])
     num_iterations = len(pre_times) - 1
     avg_pre = sum(pre_times[1:]) / num_iterations * 1000
     avg_net = sum(net_times[1:]) / num_iterations * 1000
     avg_post = sum(post_times[1:]) / num_iterations * 1000
     avg_matching = sum(matching_times[1:]) / num_iterations * 1000
+    avg_pos = sum(pos_times[1:]) / num_iterations * 1000
+
     avg_all = sum(all_times[1:]) / num_iterations * 1000
     avg_matches = sum(matches_list[1:]) / num_iterations
 
-    print(f"Średnie czasy (ms): pre: {avg_pre:.6f} | net: {avg_net:.6f} | post: {avg_post:.6f} | matching: {avg_matching:.6f} | all: {avg_all:.6f} | matches: {avg_matches:.6f}")
+    print(f"Średnie czasy (ms): pre: {avg_pre:.6f} | net: {avg_net:.6f} | post: {avg_post:.6f} | matching: {avg_matching:.6f} | position: {avg_pos:.6f} | all: {avg_all:.6f} | matches: {avg_matches:.6f}")
     return np.array(odometry.trajectory), np.array(odometry.R_list)
 
 def get_gt(start, end, file):
@@ -292,11 +296,11 @@ def save_trajectory_with_euler(filename, positions, euler_angles):
     :param euler_angles: ndarray (N, 3), kąty Eulera (rad lub deg)
     :param degrees: jeśli True, zapisuje kąty w stopniach
     """
-    # Łączymy dane w jedną macierz: [x y z roll pitch yaw]
+    # Łączymy dane w jedną macierz: [x y z yaw pitch roll  ]
     data = np.hstack((positions, euler_angles))
 
     # Zapis do pliku z nagłówkiem
-    header = "x y z roll pitch yaw"
+    header = "x y z yaw pitch roll"
     np.savetxt(filename, data, fmt="%.6f", delimiter=" ", header=header, comments='')
 
     print(f"Zapisano do pliku: {filename}")
@@ -306,25 +310,39 @@ def metrics(trajectory, est_euler, gt):
     gt_cut = PosePath3D(poses_se3=gt.poses_se3[start:end])
 
     for pos, euler in zip(trajectory, est_euler):
-        rot = R.from_euler('xyz', euler).as_matrix()  # 3x3 macierz rotacji
+        rot = R.from_euler('zyx', euler, degrees=True).as_matrix()  # 3x3 macierz rotacji
         T = np.eye(4)
         T[:3, :3] = rot
         T[:3, 3] = pos
         poses_se3.append(T)
     traj = PosePath3D(poses_se3=poses_se3)
-    ape_metric = APE(PoseRelation.translation_part)
-    ape_metric.process_data((gt_cut, traj))
-    ape_result = ape_metric.get_result()
-    print("ATE RMSE:", ape_result.stats["rmse"])
+    for relation in [
+        PoseRelation.translation_part,
+        PoseRelation.rotation_angle_deg,
+        PoseRelation.rotation_part,
+        PoseRelation.full_transformation
+    ]:
+        ape_metric = APE(relation)
+        ape_metric.process_data((gt_cut, traj))
+        stats = ape_metric.get_result().stats
+        print(f"APE ({relation.name}): RMSE = {stats['rmse']:.4f}")
 
-    rpe_metric = RPE(PoseRelation.translation_part, delta=1, delta_unit=Unit.frames)
-    rpe_metric.process_data((gt_cut, traj))
-    print("RPE RMSE:", rpe_metric.get_result().stats['rmse'])
+    # Relative Pose Error (RPE)
+    for relation in [
+        PoseRelation.translation_part,
+        PoseRelation.rotation_angle_deg,
+        PoseRelation.rotation_part,
+        PoseRelation.full_transformation
+    ]:
+        rpe_metric = RPE(relation, delta=1, delta_unit=Unit.frames)
+        rpe_metric.process_data((gt_cut, traj))
+        stats = rpe_metric.get_result().stats
+        print(f"RPE ({relation.name}): RMSE = {stats['rmse']:.4f}")
 
-def metrics_from_file(scene, database, start, end, comment):
-    data = np.loadtxt(f"results//{database}_{scene}_{start}_{end}_{comment}.txt", skiprows=1)
-    positions = data[:, 0:3]
-    euler_angles = data[:, 3:6]
+def metrics_from_file(scene, database, start, end, file_name):
+    data = np.loadtxt("results//" + file_name, skiprows=1)
+    positions = data[:, 0:3][start:end]
+    euler_angles = data[:, 3:6][start:end]
     groundtruth = "data//dataset//poses//" + f"{scene}.txt"
     pose = file_interface.read_kitti_poses_file(groundtruth)
     metrics(positions, euler_angles, pose)
@@ -336,6 +354,12 @@ def metrics_from_file(scene, database, start, end, comment):
         length += np.linalg.norm(p2 - p1)
     print(f"Total Lenght: {length}")
     print(f"Frames: {end-start}")
+    quaternions = pose.orientations_quat_wxyz[start:end]
+    quats_xyzw = quaternions[:, [1, 2, 3, 0]]
+
+    gt_rot = R.from_quat(quats_xyzw)  # scipy używa kolejności: x, y, z, w
+    gt_euler = gt_rot.as_euler('zyx', degrees=True)  # yaw, pitch, roll
+    plot_result(positions, poses, euler_angles, gt_euler)
 
 def main(scene, database, start, end, comment):
     if database == 'tum':       
@@ -353,7 +377,7 @@ def main(scene, database, start, end, comment):
         gt_euler = gt_rot.as_euler('zyx', degrees=True)  # yaw, pitch, roll
         file = 'data//dataset//sequences//' + scene + "//image_0"
         
-    trajectory, est_euler = compute_sequence(file, gt_t, gt_euler[0], "SuperGlue", database)
+    trajectory, est_euler = compute_sequence(file, gt_t, gt_euler[0], "bf", database)
 
     if database == 'tum':
         quaternions = R.from_euler("zyx", est_euler, degrees=True).as_quat()
@@ -375,7 +399,64 @@ def main(scene, database, start, end, comment):
 scene = "00"
 database = 'kitti'
 start = 0
-end = 10
-comment = "416x128_SuperPoint_SuperGlue"
-# main(scene, database, start, end, comment)
-metrics_from_file(scene, database, start, end, comment)
+end = 20
+comment = "test"
+file_name = "00_416.txt"
+main(scene, database, start, end, comment)
+# metrics_from_file(scene, database, start, end, file_name)
+
+
+
+# data1 = np.loadtxt("results//00_1241 (1).txt", skiprows=1)
+# SuperPoint_bf = data1[:, 0:3][start:end]
+
+# data2 = np.loadtxt("results//00_416.txt", skiprows=1)
+# SuperPoint_SuperGlue = data2[:, 0:3][start:end]
+
+# data3 = np.loadtxt("results//kitti_00_1_4540_416x128_Sift_bf.txt", skiprows=1)
+# Sift_bf = data3[:, 0:3][start:end]
+# euler_angles = data3[:, 3:6][start:end]
+
+# groundtruth = "data//dataset//poses//" + f"{scene}.txt"
+# pose = file_interface.read_kitti_poses_file(groundtruth)
+# poses = pose.positions_xyz[start:end]
+# tx_SuperPoint_bf, ty_SuperPoint_bf, tz_SuperPoint_bf = SuperPoint_bf[:, 0], SuperPoint_bf[:, 1], SuperPoint_bf[:, 2]
+# tx_SuperPoint_SuperGlue, ty_SuperPoint_SuperGlue, tz_SuperPoint_SuperGlue = SuperPoint_SuperGlue[:, 0], SuperPoint_SuperGlue[:, 1], SuperPoint_SuperGlue[:, 2]
+# tx_Sift_bf, ty_Sift_bf, tz_Sift_bf = Sift_bf[:, 0], Sift_bf[:, 1], Sift_bf[:, 2]
+
+# tx, ty, tz = poses[:, 0], poses[:, 1], poses[:, 2]
+
+# # Wykres 3D
+# fig = plt.figure()
+# ax = fig.add_subplot(111, projection='3d')
+# ax.plot(tx_SuperPoint_bf, ty_SuperPoint_bf, tz_SuperPoint_bf, label='1241x376', color='red')
+# ax.plot(tx_SuperPoint_SuperGlue, ty_SuperPoint_SuperGlue, tz_SuperPoint_SuperGlue, label='416x128', color='green')
+# # ax.plot(tx_Sift_bf, ty_Sift_bf, tz_Sift_bf, label='Sift_bf', color='gray')
+
+# ax.plot(tx, ty, tz, label='Ground truth', color='blue')
+
+# ax.scatter(tx_SuperPoint_bf[0], ty_SuperPoint_bf[0], tz_SuperPoint_bf[0], color='black', marker='o', s=50, label='Punkt startowy')
+# ax.set_xlabel("X")
+# ax.set_ylabel("Y")
+# ax.set_zlabel("Z")
+# ax.set_title("Trajektoria estymowana")
+# x_limits = ax.get_xlim3d()
+# y_limits = ax.get_ylim3d()
+# z_limits = ax.get_zlim3d()
+
+# x_range = abs(x_limits[1] - x_limits[0])
+# y_range = abs(y_limits[1] - y_limits[0])
+# z_range = abs(z_limits[1] - z_limits[0])
+
+# max_range = max(x_range, y_range, z_range)
+
+# # wyśrodkuj osie
+# mid_x = np.mean(x_limits)
+# mid_y = np.mean(y_limits)
+# mid_z = np.mean(z_limits)
+
+# ax.set_xlim(mid_x - max_range/2, mid_x + max_range/2)
+# ax.set_ylim(mid_y - max_range/2, mid_y + max_range/2)
+# ax.set_zlim(mid_z - max_range/2, mid_z + max_range/2)
+# ax.legend()
+# plt.show()
