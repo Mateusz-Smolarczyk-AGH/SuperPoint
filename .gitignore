@@ -9,3 +9,5 @@ data/matched/**
 outputs_batch_**
 **.xmodel
 **.pyc
+data/rgbd_dataset_**
+kria_evaluation/data_pt/**
