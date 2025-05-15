@@ -8,6 +8,7 @@ import time
 
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 
+
 def crop_center(image, target_size):
     h, w = image.shape[:2]
     new_w, new_h = target_size
@@ -17,7 +18,7 @@ def crop_center(image, target_size):
     y_start = (h - new_h) // 2
 
     # Wytnij wycinek
-    cropped = image[y_start:y_start + new_h, x_start:x_start + new_w]
+    cropped = image[y_start : y_start + new_h, x_start : x_start + new_w]
     return cropped, (x_start, y_start)
 
 
@@ -29,8 +30,9 @@ class PinholeCamera:
         self.cy = cy
         self.d = np.array([d0, d1, d2, d3, d4])
 
-class Feature_detection():
-    def __init__(self, image_size, camera, database):
+
+class Feature_detection:
+    def __init__(self, image_size, camera, database, superpoint_weights=None):
         self.input_image = None
         self.input = None
         # self.model = superpoint_pytorch.SuperPoint_short(detection_threshold=0.005, nms_radius=5).eval()
@@ -38,10 +40,12 @@ class Feature_detection():
         self.model = superpoint_pytorch.SuperPointNet(
             detection_threshold=0.005, nms_radius=5
         ).eval()
-        self.model.load_state_dict(torch.load("weights/superpoint_v1.pth", weights_only=True))
+        self.model.load_state_dict(torch.load(superpoint_weights, weights_only=True))
         self.database = database
         self.image_size = image_size
-        self.K_l = np.array([camera.fx, 0.0, camera.cx, 0.0, camera.fy, camera.cy, 0.0, 0.0, 1.0]).reshape(3, 3)
+        self.K_l = np.array(
+            [camera.fx, 0.0, camera.cx, 0.0, camera.fy, camera.cy, 0.0, 0.0, 1.0]
+        ).reshape(3, 3)
         self.d_l = camera.d
 
     def get_input(self, img) -> None:
@@ -72,14 +76,14 @@ class Feature_detection():
         predictions = self.post_processing_short(scores, descriptors_dense)
         post = time.perf_counter()
 
-        return predictions, net-start, post-net
+        return predictions, net - start, post - net
 
     def post_processing_short(self, scores, descriptors_dense):
         """
         Realise post processing including:
-        * discarding points near image border
-        * converting keypoints
-        * nms
+        ** discarding points near image border
+        ** converting keypoints
+        ** nms
         """
         conf = self.model.conf
         b = scores.shape[0]
@@ -131,17 +135,37 @@ class Feature_detection():
             "descriptors": descriptors,
         }
 
-class VisualOdometry():
-    def __init__(self, image_size, start_R, start_t, cam: PinholeCamera, matching_type='bf', database='tum'):
+
+class VisualOdometry:
+    def __init__(
+        self,
+        config,
+        image_size,
+        start_R,
+        start_t,
+        cam: PinholeCamera,
+        matching_type="bf",
+        database="tum",
+        superpoint_weights=None,
+        superglue_weights=None,
+    ):
         # self.keypoints = {"past": None,
         #                   "present": None}
 
         # self.descriptors = {"past": None,
         #                   "present": None}
+
+        self.args = config
+        # depth
+        self.past_depth = None
+        self.present_depth = None
+
         self.past_predictions = {}
         self.present_predictions = {}
         self.matches = None
-        self.feature_detection = Feature_detection(image_size, cam, database)
+        self.feature_detection = Feature_detection(
+            image_size, cam, database, superpoint_weights
+        )
         self.R_total = np.eye(3)
         self.start_R = start_R
         self.t_total = np.zeros((3, 1))
@@ -159,15 +183,16 @@ class VisualOdometry():
         self.matching_type = matching_type
         if matching_type == "SuperGlue":
             config = {
-            'weights': 'indoor',
-            'sinkhorn_iterations': 100,
-            'match_threshold': 0.2,
-            'superglue_weights': r"weights\superglue_indoor.pth",
-            'shape': image_size}
+                "weights": "indoor",
+                "sinkhorn_iterations": 100,
+                "match_threshold": 0.2,
+                "superglue_weights": superglue_weights,
+                "shape": image_size,
+            }
             self.matcher = superglue.SuperGlue(config).eval()
 
     def match_descriptors_bf(self):
-        """ 
+        """
         Match the keypoints with the warped_keypoints with nearest neighbor search
         """
         # FLANN_INDEX_KDTREE = 1
@@ -180,7 +205,11 @@ class VisualOdometry():
         bf = cv2.BFMatcher(cv2.NORM_L2, crossCheck=True)
         kp1 = self.past_predictions["keypoints"]
         kp2 = self.present_predictions["keypoints"]
-        self.matches = bf.match(self.past_predictions["descriptors"], self.present_predictions["descriptors"])
+        self.matches = bf.match(
+            self.past_predictions["descriptors"],
+            self.present_predictions["descriptors"],
+        )
+
         # self.matches = sorted(self.matches, key = lambda x:x.distance)
         # if len(self.matches) > 200:
         #     self.matches = self.matches[:200]
@@ -193,9 +222,11 @@ class VisualOdometry():
 
     def superglue_match(self):
         # Preprocess the data
-        keys = ['keypoints', 'keypoint_scores', 'descriptors']
-        last_data = {k+'0': self.past_predictions['raw'][k] for k in keys}
-        prediction_data = {k+'1': v for k, v in self.present_predictions['raw'].items()}
+        keys = ["keypoints", "keypoint_scores", "descriptors"]
+        last_data = {k + "0": self.past_predictions["raw"][k] for k in keys}
+        prediction_data = {
+            k + "1": v for k, v in self.present_predictions["raw"].items()
+        }
         data = {**last_data, **prediction_data}
 
         for k in data:
@@ -204,9 +235,8 @@ class VisualOdometry():
 
         # Perform the matching
         pred = self.matcher(data)
-        
-        return {**data, **pred}
 
+        return {**data, **pred}
 
     def compute_homography(self, matched_kp1, matched_kp2):
         if isinstance(matched_kp1[0], cv2.KeyPoint):
@@ -220,11 +250,13 @@ class VisualOdometry():
         H, inliers = cv2.findHomography(matched_pts1, matched_pts2, cv2.RANSAC)
         inliers = inliers.flatten()
         return H, inliers
-    
-    def show_arrows(self, points_from, points_to, color=(0, 255, 0), thickness=1, tipLength=0.2):
+
+    def show_arrows(
+        self, points_from, points_to, color=(0, 255, 0), thickness=1, tipLength=0.2
+    ):
         """
         Rysuje strzałki od punktów 'points_from' do 'points_to' na obrazie.
-        
+
         Parameters:
             image (np.ndarray): Obraz wejściowy (modyfikowany w miejscu).
             points_from (np.ndarray): Punkty początkowe, shape (N, 2)
@@ -236,10 +268,29 @@ class VisualOdometry():
         for pt1, pt2 in zip(points_from, points_to):
             pt1 = tuple(map(int, pt1))
             pt2 = tuple(map(int, pt2))
-            cv2.arrowedLine(self.feature_detection.input_image, pt1, pt2, color, thickness, tipLength=tipLength)
+
+            # draw points
+            cv2.circle(self.feature_detection.input_image, pt1, 3, (0, 0, 0), -1)
+            cv2.circle(self.feature_detection.input_image, pt2, 3, (255, 255, 255), -1)
+            cv2.arrowedLine(
+                self.feature_detection.input_image,
+                pt1,
+                pt2,
+                color,
+                thickness,
+                tipLength=tipLength,
+            )
 
     def pose_estimation(self, points1, points2, abs_scale):
-        E, mask = cv2.findEssentialMat(points2, points1, focal=self.focal, pp=self.pp,  method=cv2.RANSAC, prob=0.999, threshold=1.0)
+        E, mask = cv2.findEssentialMat(
+            points2,
+            points1,
+            focal=self.focal,
+            pp=self.pp,
+            method=cv2.RANSAC,
+            prob=0.999,
+            threshold=1.0,
+        )
         # best_num_inliers = 0
         # for _E in np.split(E, len(E) / 3):
         #     n, R_temp, t_temp, _ = cv2.recoverPose(
@@ -248,77 +299,162 @@ class VisualOdometry():
         #         best_num_inliers = n
         #         R_diff, t = R_temp, t_temp
         #         # ret = (R, t[:, 0], mask.ravel() > 0)
-        points, R_diff, t, mask = cv2.recoverPose(E, points2[mask.ravel().astype(bool)], points1[mask.ravel().astype(bool)], focal=self.focal, pp=self.pp)
-        
-        angles_change = R.from_matrix(R_diff).as_euler('zyx', degrees=True)
+
+        if self.args.vo_type == "rgb":
+            points, R_diff, t, mask = cv2.recoverPose(
+                E,
+                points2[mask.ravel().astype(bool)],
+                points1[mask.ravel().astype(bool)],
+                focal=self.focal,
+                pp=self.pp,
+            )
+
+        if self.args.vo_type == "rgbd":
+            pts2d, pts3d = self.depth_estimation(points1, points2)
+
+            success, rvec, tvec, inliers = cv2.solvePnPRansac(
+                pts3d, pts2d, self.K, None
+            )
+            R_3d, _ = cv2.Rodrigues(rvec)
+
+            # Dane z solvePnPRansac (R_cam, t_cam): świat → kamera
+            R_rel = R_3d
+            t_rel = tvec.reshape(3, 1)
+
+            # Odwrócenie transformacji: kamera → świat
+            R_rel_inv = R_rel.T
+            t_rel_inv = -R_rel_inv @ t_rel
+
+            R_diff = R_rel_inv
+            t = t_rel_inv
+
+            abs_scale = 1
+
+        angles_change = R.from_matrix(R_diff).as_euler("zyx", degrees=True)
         if np.any(np.abs(angles_change) > 15):
             return 1
-        # abs_scale  = 1
-        self.t_total = self.t_total + abs_scale*self.R_total.dot(t)
-        r_total_rr = R.from_matrix(self.R_total).as_euler('zyx', degrees=True)
 
+        self.t_total = self.t_total + abs_scale * self.R_total.dot(t)
         self.R_total = self.R_total.dot(R_diff)
         r_total_rqqr = R.from_matrix(self.R_total).as_euler('zyx', degrees=True)
 
         return 0
 
-    def compute_first_image(self, image):
+    def depth_estimation(self, kp1, kp2, factor=5000):
+
+        pts2d = []
+        pts3d = []
+        for p1, p2 in zip(kp1, kp2):
+            u, v = p1
+            d = self.past_depth[int(v), int(u)] / factor
+
+            if d == 0:
+                continue
+
+            x = (u - self.K[0, 2]) * d / self.K[0, 0]
+            y = (v - self.K[1, 2]) * d / self.K[1, 1]
+
+            pts3d.append([x, y, d])
+            pts2d.append(p2)
+
+        pts3d = np.array(pts3d, dtype=np.float32).reshape(-1, 1, 3)
+        pts2d = np.array(pts2d, dtype=np.float32).reshape(-1, 1, 2)
+
+        return pts2d, pts3d
+
+    def compute_first_image(self, image, depth_image=None):
         self.feature_detection.get_input(image)
-        self.past_predictions['raw'], _, _ = self.feature_detection.process_Superpoint()
-        self.past_predictions['descriptors'] = self.past_predictions['raw']['descriptors'][0].cpu().detach().numpy().astype(np.float32)
-        points_th = self.past_predictions['raw']['keypoints'][0]
+        self.past_predictions["raw"], _, _ = self.feature_detection.process_Superpoint()
+        self.past_predictions["descriptors"] = (
+            self.past_predictions["raw"]["descriptors"][0]
+            .cpu()
+            .detach()
+            .numpy()
+            .astype(np.float32)
+        )
+        points_th = self.past_predictions["raw"]["keypoints"][0]
         keypoints_np = np.array(points_th)
-        self.past_predictions['keypoints'] = [cv2.KeyPoint(float(p[0]), float(p[1]), 1) for p in keypoints_np]
-        # img = cv2.resize(image, self.feature_detection.image_size)
-        # gray= cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        self.past_predictions["keypoints"] = [
+            cv2.KeyPoint(float(p[0]), float(p[1]), 1) for p in keypoints_np
+        ]
+
+        if depth_image is not None and self.args.vo_type == "rgbd":
+            self.past_depth = depth_image
+
+        # gray= cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         # sift = cv2.SIFT_create()
         # self.past_predictions['keypoints'], self.past_predictions['descriptors'] = sift.detectAndCompute(gray,None)
 
-    def compute_pipeline(self, image, pos_cur=None, pos_prev=None):
+    def compute_pipeline(self, image, pos_cur=None, pos_prev=None, depth_image=None):
         start = time.perf_counter()
-        #preprocessing
+        # preprocessing
         self.feature_detection.get_input(image)
         pre = time.perf_counter()
-        #superPoint
-        self.present_predictions['raw'], net, post = self.feature_detection.process_Superpoint()
+        # superPoint
+        self.present_predictions["raw"], net, post = (
+            self.feature_detection.process_Superpoint()
+        )
         # net = 0
         # post = 0
         match = time.perf_counter()
-        #matching
-        self.present_predictions['descriptors'] = self.present_predictions['raw']['descriptors'][0].cpu().detach().numpy().astype(np.float32)
-        points_th = self.present_predictions['raw']['keypoints'][0]
+        # matching
+        self.present_predictions["descriptors"] = (
+            self.present_predictions["raw"]["descriptors"][0]
+            .cpu()
+            .detach()
+            .numpy()
+            .astype(np.float32)
+        )
+        points_th = self.present_predictions["raw"]["keypoints"][0]
         keypoints_np = np.array(points_th)
-        self.present_predictions['keypoints'] = [cv2.KeyPoint(float(p[0]), float(p[1]), 1) for p in keypoints_np]
-        # img = cv2.resize(image, self.feature_detection.image_size)
-        # gray= cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        self.present_predictions["keypoints"] = [
+            cv2.KeyPoint(float(p[0]), float(p[1]), 1) for p in keypoints_np
+        ]
+        # gray= cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         # sift = cv2.SIFT_create()
         # self.present_predictions['keypoints'], self.present_predictions['descriptors'] = sift.detectAndCompute(gray,None)
 
-        if self.matching_type == "bf":      
+        if depth_image is not None and self.args.vo_type == "rgbd":
+            self.present_depth = depth_image
+
+        if self.matching_type == "bf":
             m_kp1, m_kp2 = self.match_descriptors_bf()
             H, inliers = self.compute_homography(m_kp1, m_kp2)
             self.matches = np.array(self.matches)[inliers.astype(bool)].tolist()
-            pts1 = np.float32([self.past_predictions['keypoints'][match.queryIdx].pt for match in self.matches])  # shape (N, 2)
-            pts2 = np.float32([self.present_predictions['keypoints'][match.trainIdx].pt for match in self.matches])  # shape (N, 2)
+            pts1 = np.float32(
+                [
+                    self.past_predictions["keypoints"][match.queryIdx].pt
+                    for match in self.matches
+                ]
+            )  # shape (N, 2)
+            pts2 = np.float32(
+                [
+                    self.present_predictions["keypoints"][match.trainIdx].pt
+                    for match in self.matches
+                ]
+            )  # shape (N, 2)
         if self.matching_type == "SuperGlue":
             sg_matching = self.superglue_match()
-            sg_kpts0 = self.past_predictions['raw']['keypoints'][0].cpu().numpy()
-            sg_kpts1 = sg_matching['keypoints1'][0].cpu().numpy()
-            sg_matches = sg_matching['matches0'][0].cpu().numpy()
-            sg_confidence = sg_matching['matching_scores0'][0].detach().cpu().numpy()
+            sg_kpts0 = self.past_predictions["raw"]["keypoints"][0].cpu().numpy()
+            sg_kpts1 = sg_matching["keypoints1"][0].cpu().numpy()
+            sg_matches = sg_matching["matches0"][0].cpu().numpy()
+            sg_confidence = sg_matching["matching_scores0"][0].detach().cpu().numpy()
 
             sg_valid = sg_matches > -1
             m_kp1 = sg_kpts0[sg_valid]
-            m_kp2 = sg_kpts1[sg_matches[sg_valid]]        
+            m_kp2 = sg_kpts1[sg_matches[sg_valid]]
             H, inliers = self.compute_homography(m_kp1, m_kp2)
             pts1 = m_kp1[inliers.astype(bool)]
             pts2 = m_kp2[inliers.astype(bool)]
+
         end = time.perf_counter()
-        #pose estimation
+        # pose estimation
         if pos_cur is None:
             abs_scale = 1
         else:
             abs_scale = np.linalg.norm(pos_cur - pos_prev)
+            # print("Scale: ", abs_scale)
+
         # abs_scale = np.sqrt((pos_cur[0] - pos_prev[0])*(pos_cur[0] - pos_prev[0]) + (pos_cur[1] - pos_prev[1])*(pos_cur[1] - pos_prev[1]) + (pos_cur[1] - pos_prev[1])*(pos_cur[1] - pos_prev[1]))
         result = self.pose_estimation(pts1, pts2, abs_scale)
         r_global = self.start_R.dot(self.R_total)
@@ -330,5 +466,5 @@ class VisualOdometry():
         self.trajectory.append(trac.flatten().tolist())
         position_time = time.perf_counter()
         self.show_arrows(pts1, pts2)
-        
-        return result, (pre-start, net, post, end-match, position_time - end, len(pts1))
+
+        return result, (pre - start, net, post, end - match, len(pts1))
