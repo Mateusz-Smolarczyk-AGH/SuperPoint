@@ -69,9 +69,22 @@ class Feature_detection:
         Process NN and short post processing.
         """
         start = time.perf_counter()
+
         input_tensor = torch.from_numpy(self.input[None, None]).float()
+
         scores, descriptors_dense = self.model(input_tensor)
         net = time.perf_counter()
+
+        scores = torch.nn.functional.softmax(scores, 1)[:, :-1]
+        softmax = time.perf_counter()
+
+        b, _, h, w = scores.shape
+        scores = scores.permute(0, 2, 3, 1).reshape(b, h, w, 8, 8)
+        scores = scores.permute(0, 1, 3, 2, 4).reshape(
+            b, h * 8, w * 8
+        )
+        dn = torch.norm(descriptors_dense, p=2, dim=1) # Compute the norm.
+        descriptors_dense = descriptors_dense.div(torch.unsqueeze(dn, 1)) # Divide by norm to normalize.
 
         predictions = self.post_processing_short(scores, descriptors_dense)
         post = time.perf_counter()
@@ -176,7 +189,8 @@ class VisualOdometry:
             [[cam.fx, 0.0, cam.cx], [0.0, cam.fy, cam.cy], [0.0, 0.0, 1.0]]
         )
         self.d = cam.d
-        self.trajectory = [self.start_t.flatten().tolist()]
+        starts =self.start_R.dot(self.t_total) + self.start_t
+        self.trajectory = [starts.flatten().tolist()]
         r = R.from_matrix(start_R)
         angles = r.as_euler("zyx", degrees=True)  # yaw, pitch, roll
         self.R_list = [angles]
@@ -336,7 +350,6 @@ class VisualOdometry:
 
         self.t_total = self.t_total + abs_scale * self.R_total.dot(t)
         self.R_total = self.R_total.dot(R_diff)
-        r_total_rqqr = R.from_matrix(self.R_total).as_euler('zyx', degrees=True)
 
         return 0
 
@@ -385,14 +398,14 @@ class VisualOdometry:
         # sift = cv2.SIFT_create()
         # self.past_predictions['keypoints'], self.past_predictions['descriptors'] = sift.detectAndCompute(gray,None)
 
-    def compute_pipeline(self, image, pos_cur=None, pos_prev=None, depth_image=None):
+    def compute_pipeline(self, image, pos_cur=None, pos_prev=None, depth_image=None, bugfix=None):
         start = time.perf_counter()
         # preprocessing
         self.feature_detection.get_input(image)
         pre = time.perf_counter()
         # superPoint
         self.present_predictions["raw"], net, post = (
-            self.feature_detection.process_Superpoint()
+           self.feature_detection.process_Superpoint()
         )
         # net = 0
         # post = 0
@@ -455,8 +468,8 @@ class VisualOdometry:
             abs_scale = np.linalg.norm(pos_cur - pos_prev)
             # print("Scale: ", abs_scale)
 
-        # abs_scale = np.sqrt((pos_cur[0] - pos_prev[0])*(pos_cur[0] - pos_prev[0]) + (pos_cur[1] - pos_prev[1])*(pos_cur[1] - pos_prev[1]) + (pos_cur[1] - pos_prev[1])*(pos_cur[1] - pos_prev[1]))
         result = self.pose_estimation(pts1, pts2, abs_scale)
+
         r_global = self.start_R.dot(self.R_total)
         r = R.from_matrix(r_global)
         angles = r.as_euler("zyx", degrees=True)  # yaw, pitch, roll
@@ -467,4 +480,4 @@ class VisualOdometry:
         position_time = time.perf_counter()
         self.show_arrows(pts1, pts2)
 
-        return result, (pre - start, net, post, end - match, len(pts1))
+        return result, (pre - start, net, post, end - match, position_time - end, len(self.present_predictions["keypoints"]))

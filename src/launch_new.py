@@ -16,7 +16,7 @@ from pathlib import Path
 import argparse
 import torch
 from tqdm import tqdm
-
+import time
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 
 
@@ -153,12 +153,12 @@ def compute_sequence(
     camera.cx = camera.cx * scale_x
     camera.cy = camera.cy * scale_y
 
-    if database == "tum":
-        first_image = cv2.resize(first_image, (image_size[0] + 32, image_size[1] + 16))
-        first_image = cv2.undistort(first_image, K_l, camera.d)
-        first_image = first_image[8:-8, 16:-16, :]
-    else:
-        first_image = cv2.resize(first_image, image_size)
+    # if database == "tum":
+    #     first_image = cv2.resize(first_image, (image_size[0] + 32, image_size[1] + 16))
+    #     first_image = cv2.undistort(first_image, K_l, camera.d)
+    #     first_image = first_image[8:-8, 16:-16, :]
+    # else:
+    #     first_image = cv2.resize(first_image, image_size)
 
     odometry = processing.VisualOdometry(
         args,
@@ -177,6 +177,8 @@ def compute_sequence(
     depth_image = None
     for i in tqdm(range(args.start + 1, args.end)):
         # print(f"Processing: {(i-(args.start+1))/(args.end-args.start+1) * 100}%")
+        start = time.perf_counter()
+
         image_file = image_files[i]
         image_path = os.path.join(image_folder, image_file)
         image = cv2.imread(image_path)
@@ -189,7 +191,7 @@ def compute_sequence(
 
             cv2.imshow("Depth", depth_image)
 
-        skip_frame, time = odometry.compute_pipeline(
+        skip_frame, times = odometry.compute_pipeline(
             image, t_gt[i - args.start], t_gt[i - args.start - 1], depth_image
         )
         if skip_frame == 0:
@@ -197,6 +199,7 @@ def compute_sequence(
 
             if args.vo_type == "rgbd":
                 odometry.past_depth = odometry.present_depth.copy()
+        end = time.perf_counter()
 
         cv2.imshow("Film", odometry.feature_detection.input_image)
 
@@ -204,11 +207,14 @@ def compute_sequence(
         if cv2.waitKey(1) & 0xFF == ord("q"):
             break
 
-        pre_times.append(time[0])
-        net_times.append(time[1])
-        post_times.append(time[2])
-        matching_times.append(time[3])
-        matches_list.append(time[4])
+        pre_times.append(times[0])
+        net_times.append(times[1])
+        post_times.append(times[2])
+        matching_times.append(times[3])
+        pos_times.append(times[4])
+
+        matches_list.append(times[5])
+        all_times.append(end - start)
 
     num_iterations = len(pre_times) - 1
     avg_pre = sum(pre_times[1:]) / num_iterations * 1000
@@ -221,7 +227,7 @@ def compute_sequence(
     avg_matches = sum(matches_list[1:]) / num_iterations
 
     print(
-        f"Średnie czasy (ms): pre: {avg_pre:.6f} | net: {avg_net:.6f} | post: {avg_post:.6f} | matching: {avg_matching:.6f} | all: {avg_all:.6f} | matches: {avg_matches:.6f}"
+        f"Średnie czasy (ms): pre: {avg_pre:.6f} | net: {avg_net:.6f} | post: {avg_post:.6f}| mach: {avg_matching:.6f} | pose: {avg_pos:.6f} | all: {avg_all:.6f} | matches: {avg_matches:.6f}"
     )
     return np.array(odometry.trajectory), np.array(odometry.R_list)
 
@@ -277,6 +283,20 @@ def save_trajectory(t, euler_angles, time_array, output_file):
     # Zapisz do pliku
     np.savetxt(output_file, output_data, fmt="%.4f")
 
+def load_trajectory(input_file):
+    # Wczytaj dane z pliku
+    data = np.loadtxt(input_file)
+
+    # Rozdziel dane
+    time_array = data[:, 0]
+    t = data[:, 1:4]               # tx, ty, tz
+    quats = data[:, 4:8]           # qx, qy, qz, qw
+
+    # Zamień kwaterniony na kąty Eulera (w stopniach)
+    rot = R.from_quat(quats)       # scipy oczekuje formatu [x, y, z, w]
+    euler_angles = rot.as_euler("zyx", degrees=True)
+
+    return t, euler_angles, time_array
 
 def normalized_ape(gt_coords, est_coords):
     gt = np.array(gt_coords)
@@ -402,12 +422,12 @@ def save_trajectory_with_euler(filename, positions, euler_angles):
     print(f"Zapisano do pliku: {filename}")
 
 
-def metrics(trajectory, est_euler, gt, args):
+def metrics(trajectory, est_euler, gt):
     poses_se3 = []
-    gt_cut = PosePath3D(poses_se3=gt.poses_se3[args.start : args.end])
+    gt_cut = PosePath3D(poses_se3=gt.poses_se3[start:end])
 
     for pos, euler in zip(trajectory, est_euler):
-        rot = R.from_euler("xyz", euler).as_matrix()  # 3x3 macierz rotacji
+        rot = R.from_euler('zyx', euler, degrees=True).as_matrix()  # 3x3 macierz rotacji
         T = np.eye(4)
         T[:3, :3] = rot
         T[:3, 3] = pos
@@ -424,123 +444,227 @@ def metrics(trajectory, est_euler, gt, args):
         stats = ape_metric.get_result().stats
         print(f"APE ({relation.name}): RMSE = {stats['rmse']:.4f}")
 
-    rpe_metric = RPE(PoseRelation.translation_part, delta=1, delta_unit=Unit.frames)
-    rpe_metric.process_data((gt_cut, traj))
-    print("RPE RMSE:", rpe_metric.get_result().stats["rmse"])
+    # Relative Pose Error (RPE)
+    for relation in [
+        PoseRelation.translation_part,
+        PoseRelation.rotation_angle_deg,
+        PoseRelation.rotation_part,
+        PoseRelation.full_transformation
+    ]:
+        rpe_metric = RPE(relation, delta=1, delta_unit=Unit.frames)
+        rpe_metric.process_data((gt_cut, traj))
+        stats = rpe_metric.get_result().stats
+        print(f"RPE ({relation.name}): RMSE = {stats['rmse']:.4f}")
 
-
-def metrics_from_file(gt_file, comment, args):
-    data = np.loadtxt(
-        args.maindir
-        / f"results/{args.database}_{args.kitti_seq}_{args.start}_{args.end}_{comment}.txt",
-        skiprows=1,
-    )
-    positions = data[:, 0:3]
-    euler_angles = data[:, 3:6]
-
-    pose = file_interface.read_kitti_poses_file(gt_file)
-    metrics(positions, euler_angles, pose, args)
-    poses = pose.positions_xyz[args.start : args.end]
+def metrics_from_file(scene, database, start, end, file_name):
+    data = np.loadtxt("results//" + file_name, skiprows=1)
+    positions = data[:, 0:3][start:end]
+    euler_angles = data[:, 3:6][start:end]
+    groundtruth = "data//dataset//poses//" + f"{scene}.txt"
+    pose = file_interface.read_kitti_poses_file(groundtruth)
+    metrics(positions, euler_angles, pose)
+    poses = pose.positions_xyz[start:end]
     length = 0
     for i in range(1, len(poses)):
-        p1 = poses[i - 1]  # pozycja xyz z macierzy 4x4
+        p1 = poses[i-1]  # pozycja xyz z macierzy 4x4
         p2 = poses[i]
         length += np.linalg.norm(p2 - p1)
     print(f"Total Lenght: {length}")
-    print(f"Frames: {args.end-args.start}")
+    print(f"Frames: {end-start}")
+    quaternions = pose.orientations_quat_wxyz[start:end]
+    quats_xyzw = quaternions[:, [1, 2, 3, 0]]
 
+    gt_rot = R.from_quat(quats_xyzw)  # scipy używa kolejności: x, y, z, w
+    gt_euler = gt_rot.as_euler('zyx', degrees=True)  # yaw, pitch, roll
+    plot_result(positions, poses, euler_angles, gt_euler)
 
-if __name__ == "__main__":
+def metrics_from_file_tum(file_name):
+    poses_se3 = []
 
-    ### Main configuration ###
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--maindir",
-        type=Path,
-        default="/uczelnia/Repositorium/superpoint-fpga/SuperPoint",
-    )
-    parser.add_argument(
-        "--superglue_weights", type=str, default="weights/superglue_indoor.pth"
-    )
+    positions, euler_angles, time_array = load_trajectory("results//" + file_name)
+    positions = positions[start:end]
+    euler_angles = euler_angles[start:end]
+    groundtruth = Path(r"data\rgbd_dataset_freiburg1_xyz")
+    # quaternions = R.from_euler("zyx", euler_angles, degrees=True).as_quat()
 
-    parser.add_argument("--vo_type", type=str, default="rgb")  # [rgb, rgbd]
-    parser.add_argument("--database", type=str, default="tum")  # [tum, kitti]
-    parser.add_argument("--network", type=str, default="weights/superpoint_v1.pth")
-    parser.add_argument(
-        "--kittidir",
-        type=Path,
-        default="/uczelnia/Repositorium/superpoint-fpga/data_odometry_color/dataset",
-    )
-    parser.add_argument(
-        "--tumdir",
-        type=Path,
-        default="/uczelnia/Repositorium/superpoint-fpga/SuperPoint/data",
-    )
+    # corect_trajectory(
+    #          groundtruth / "groundtruth.txt", quaternions, time_array, "rgbd_dataset_freiburg1_floor", positions)
     
-    parser.add_argument("--tum_seq", type=str, default="rgbd_dataset_freiburg1_floor")
-    parser.add_argument("--kitti_seq", type=str, default="00")
-    parser.add_argument("--kitti_gt", type=Path, default="datasets/KITTI/poses/00.txt")
-    parser.add_argument("--start", type=int, default=0)
-    parser.add_argument("--end", type=int, default=100)
-    parser.add_argument("--viz", action="store_true", default=True)
-    parser.add_argument("--show_img", action="store_true")
-    parser.add_argument("--plot", action="store_true")
-    parser.add_argument("--save_trajectory", action="store_true")
-    args = parser.parse_args()
+    gt_t, gt_euler, time_array_gt = get_gt(start, end, groundtruth)
+    for pos, euler in zip(gt_t, gt_euler):
+        rot = R.from_euler('zyx', euler, degrees=True).as_matrix()  # 3x3 macierz rotacji
+        T = np.eye(4)
+        T[:3, :3] = rot
+        T[:3, 3] = pos
+        poses_se3.append(T)
+    pose = PosePath3D(poses_se3=poses_se3)
+    metrics(positions, euler_angles, pose)
+    length = 0
+    for i in range(1, len(gt_t)):
+        p1 = gt_t[i-1]  # pozycja xyz z macierzy 4x4
+        p2 = gt_t[i]
+        length += np.linalg.norm(p2 - p1)
+    print(f"Total Lenght: {length}")
+    print(f"Frames: {end-start}")
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device}")
+    plot_result(positions, gt_t, euler_angles, gt_euler)
 
-    comment = "416x128_SuperPoint_SuperGlue"
+# if __name__ == "__main__":
 
-    if args.database == "tum":
-        file = args.tumdir / args.tum_seq
-        gt_t, gt_euler, time_array = get_gt(args.start, args.end, file)
-        file_image = file / "rgb"
-    if args.database == "kitti":
-        groundtruth = args.kittidir / "poses" / f"{args.kitti_seq}.txt"
+#     ### Main configuration ###
+#     parser = argparse.ArgumentParser()
+#     parser.add_argument(
+#         "--maindir",
+#         type=Path,
+#         # default="/uczelnia/Repositorium/superpoint-fpga/SuperPoint",
+#         default=''
+#     )
+#     parser.add_argument(
+#         "--superglue_weights", type=str, default="weights/superglue_indoor.pth"
+#     )
 
-        pose = file_interface.read_kitti_poses_file(groundtruth)
-        gt_t = pose.positions_xyz[args.start : args.end]
-        quaternions = pose.orientations_quat_wxyz[args.start : args.end]
-        quats_xyzw = quaternions[:, [1, 2, 3, 0]]
+#     parser.add_argument("--vo_type", type=str, default="rgb")  # [rgb, rgbd]
+#     parser.add_argument("--database", type=str, default="tum")  # [tum, kitti]
+#     parser.add_argument("--network", type=str, default="weights/superpoint_v1.pth")
+#     parser.add_argument(
+#         "--kittidir",
+#         type=Path,
+#         # default="/uczelnia/Repositorium/superpoint-fpga/data_odometry_color/dataset",
+#         default="data/dataset"
+#     )
+#     parser.add_argument(
+#         "--tumdir",
+#         type=Path,
+#         # default="/uczelnia/Repositorium/superpoint-fpga/SuperPoint/data",
+#         default="data"
+#     )
+    
+#     parser.add_argument("--tum_seq", type=str, default="rgbd_dataset_freiburg1_xyz")
+#     parser.add_argument("--kitti_seq", type=str, default="00")
+#     parser.add_argument("--kitti_gt", type=Path, default="data/datasets/poses/00.txt")
+#     parser.add_argument("--start", type=int, default=0)
+#     parser.add_argument("--end", type=int, default=200)
+#     parser.add_argument("--viz", action="store_true", default=True)
+#     parser.add_argument("--show_img", action="store_true")
+#     parser.add_argument("--plot", action="store_true")
+#     parser.add_argument("--save_trajectory", action="store_true")
+#     args = parser.parse_args()
 
-        gt_rot = R.from_quat(quats_xyzw)  # scipy używa kolejności: x, y, z, w
-        gt_euler = gt_rot.as_euler("zyx", degrees=True)  # yaw, pitch, roll
-        file_image = args.kittidir / "sequences" / args.kitti_seq / "image_2"
+#     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+#     print(f"Using device: {device}")
 
-    trajectory, est_euler = compute_sequence(
-        file_image,
-        gt_t,
-        gt_euler[0],
-        "SuperGlue",
-        args.database,
-        args=args,
-        depth_image_folder=file / "depth" if args.database == "tum" else None,
-    )
+#     comment = "416x128_SuperPoint_SuperGlue"
 
-    if args.database == "tum":
-        quaternions = R.from_euler("zyx", est_euler, degrees=True).as_quat()
-        groundtruth = file / "groundtruth.txt"
-        corect_trajectory(
-            groundtruth, quaternions, time_array, args.tum_seq, trajectory
-        )
-        save_trajectory(
-            trajectory,
-            est_euler,
-            time_array,
-            args.maindir / "results/generated_trajectory.txt",
-        )
-    if args.database == "kitti":
-        metrics(trajectory, est_euler, pose, args)
-    save_trajectory_with_euler(
-        args.maindir
-        / f"results/{args.database}_{args.kitti_seq}_{args.start}_{args.end}_{comment}.txt",
-        trajectory,
-        est_euler,
-    )
-    if args.viz:
-        plot_result(trajectory, gt_t, est_euler, gt_euler)
+#     if args.database == "tum":
+#         file = args.tumdir / args.tum_seq
+#         gt_t, gt_euler, time_array = get_gt(args.start, args.end, file)
+#         file_image = file / "rgb"
+#     if args.database == "kitti":
+#         groundtruth = args.kittidir / "poses" / f"{args.kitti_seq}.txt"
 
-if args.database == "kitti":
-    metrics_from_file(args.kittidir / "poses" / f"{args.kitti_seq}.txt", comment, args)
+#         pose = file_interface.read_kitti_poses_file(groundtruth)
+#         gt_t = pose.positions_xyz[args.start : args.end]
+#         quaternions = pose.orientations_quat_wxyz[args.start : args.end]
+#         quats_xyzw = quaternions[:, [1, 2, 3, 0]]
+
+#         gt_rot = R.from_quat(quats_xyzw)  # scipy używa kolejności: x, y, z, w
+#         gt_euler = gt_rot.as_euler("zyx", degrees=True)  # yaw, pitch, roll
+#         file_image = args.kittidir / "sequences" / args.kitti_seq / "image_0"
+
+#     trajectory, est_euler = compute_sequence(
+#         file_image,
+#         gt_t,
+#         gt_euler[0],
+#         "bf",
+#         args.database,
+#         args=args,
+#         depth_image_folder=file / "depth" if args.database == "tum" else None,
+#     )
+
+#     if args.database == "tum":
+#         quaternions = R.from_euler("zyx", est_euler, degrees=True).as_quat()
+#         groundtruth = file / "groundtruth.txt"
+#         corect_trajectory(
+#             groundtruth, quaternions, time_array, args.tum_seq, trajectory
+#         )
+#         save_trajectory(
+#             trajectory,
+#             est_euler,
+#             time_array,
+#             args.maindir / "results/generated_trajectory.txt",
+#         )
+#     if args.database == "kitti":
+#         metrics(trajectory, est_euler, pose, args)
+#     save_trajectory_with_euler(
+#         args.maindir
+#         / f"results/{args.database}_{args.kitti_seq}_{args.start}_{args.end}_{comment}.txt",
+#         trajectory,
+#         est_euler,
+#     )
+#     if args.viz:
+#         plot_result(trajectory, gt_t, est_euler, gt_euler)
+
+# if args.database == "kitti":
+#     metrics_from_file(args.kittidir / "poses" / f"{args.kitti_seq}.txt", comment, args)
+
+scene = "00"
+database = 'tum'
+start = 0
+end = 200
+comment = "test"
+file_name = "tum_not_int8t.txt"
+data1 = np.loadtxt("results//00_soft (1).txt", skiprows=1)
+SuperPoint_bf = data1[:, 0:3][start:end]
+metrics_from_file_tum(file_name)
+
+
+# data2 = np.loadtxt("results//00_416.txt", skiprows=1)
+# SuperPoint_SuperGlue = data2[:, 0:3][start:end]
+
+# data3 = np.loadtxt("results//kitti_00_1_4540_416x128_Sift_bf.txt", skiprows=1)
+# Sift_bf = data3[:, 0:3][start:end]
+# euler_angles = data3[:, 3:6][start:end]
+
+# groundtruth = "data//dataset//poses//" + f"{scene}.txt"
+# pose = file_interface.read_kitti_poses_file(groundtruth)
+# poses = pose.positions_xyz[start:end]
+# tx_SuperPoint_bf, ty_SuperPoint_bf, tz_SuperPoint_bf = SuperPoint_bf[:, 0], SuperPoint_bf[:, 1], SuperPoint_bf[:, 2]
+# tx_SuperPoint_SuperGlue, ty_SuperPoint_SuperGlue, tz_SuperPoint_SuperGlue = SuperPoint_SuperGlue[:, 0], SuperPoint_SuperGlue[:, 1], SuperPoint_SuperGlue[:, 2]
+# tx_Sift_bf, ty_Sift_bf, tz_Sift_bf = Sift_bf[:, 0], Sift_bf[:, 1], Sift_bf[:, 2]
+
+# tx, ty, tz = poses[:, 0], poses[:, 1], poses[:, 2]
+
+# # Wykres 3D
+# fig = plt.figure()
+# ax = fig.add_subplot(111, projection='3d')
+# ax.plot(tx_SuperPoint_bf, ty_SuperPoint_bf, tz_SuperPoint_bf, label='Softmax DPU', color='red')
+# ax.plot(tx_SuperPoint_SuperGlue, ty_SuperPoint_SuperGlue, tz_SuperPoint_SuperGlue, label='Softmax CPU', color='green')
+# # ax.plot(tx_Sift_bf, ty_Sift_bf, tz_Sift_bf, label='Sift_bf', color='gray')
+
+# ax.plot(tx, ty, tz, label='Ground truth', color='blue')
+
+# ax.scatter(tx_SuperPoint_bf[0], ty_SuperPoint_bf[0], tz_SuperPoint_bf[0], color='black', marker='o', s=50, label='Punkt startowy')
+# ax.set_xlabel("X")
+# ax.set_ylabel("Y")
+# ax.set_zlabel("Z")
+# ax.set_title("Trajektoria estymowana")
+# x_limits = ax.get_xlim3d()
+# y_limits = ax.get_ylim3d()
+# z_limits = ax.get_zlim3d()
+
+# x_range = abs(x_limits[1] - x_limits[0])
+# y_range = abs(y_limits[1] - y_limits[0])
+# z_range = abs(z_limits[1] - z_limits[0])
+
+# max_range = max(x_range, y_range, z_range)
+
+# # wyśrodkuj osie
+# mid_x = np.mean(x_limits)
+# mid_y = np.mean(y_limits)
+# mid_z = np.mean(z_limits)
+
+# ax.set_xlim(mid_x - max_range/2, mid_x + max_range/2)
+# ax.set_ylim(mid_y - max_range/2, mid_y + max_range/2)
+# ax.set_zlim(mid_z - max_range/2, mid_z + max_range/2)
+# ax.legend()
+# plt.show()

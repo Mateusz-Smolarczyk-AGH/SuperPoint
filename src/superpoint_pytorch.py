@@ -2,6 +2,7 @@
    derived from the TensorFlow re-implementation (2018).
    Authors: Rémi Pautrat, Paul-Edouard Sarlin
 """
+import time
 import torch.nn as nn
 import torch
 from collections import OrderedDict
@@ -335,6 +336,8 @@ class SuperPointNet(torch.nn.Module):
         desc: Output descriptor pytorch tensor shaped N x 256 x H/8 x W/8.
         """
         # Shared Encoder.
+        start = time.perf_counter()
+
         x = self.relu(self.conv1a(x))
         x = self.relu(self.conv1b(x))
         x = self.pool(x)
@@ -359,6 +362,6 @@ class SuperPointNet(torch.nn.Module):
         # Descriptor Head.
         cDa = self.relu(self.convDa(x))
         desc = self.convDb(cDa)
-        dn = torch.norm(desc, p=2, dim=1) # Compute the norm.
-        desc = desc.div(torch.unsqueeze(dn, 1)) # Divide by norm to normalize.
-        return scores, desc
+        # dn = torch.norm(desc, p=2, dim=1) # Compute the norm.
+        # desc = desc.div(torch.unsqueeze(dn, 1)) # Divide by norm to normalize.
+        return semi, desc

@@ -8,7 +8,9 @@ csv_files = [
     "160x120.csv",
     "320x240.csv",
     "640x480.csv",
-    "1280x960.csv"
+    "1280x960.csv",
+    "soft_416.csv",
+    "416_not_soft.csv"
 ]
 
 def load_power_values(file_path):
@@ -21,8 +23,8 @@ def load_power_values(file_path):
             if row:
                 try:
                     value = float(row[0])
-                    # if value >= 5000:
-                    values.append(value - 4240)
+                    if value >= 5000:
+                        values.append(value - 4240)
                 except ValueError:
                     continue
             if count > 50:
@@ -32,6 +34,7 @@ def load_power_values(file_path):
 plt.figure(figsize=(10, 6))
 
 for file in csv_files:
+    file = "kria_run/" + file
     if os.path.exists(file):
         power_values = load_power_values(file)
         if power_values:
