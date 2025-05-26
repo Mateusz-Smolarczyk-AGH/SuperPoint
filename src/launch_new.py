@@ -509,162 +509,110 @@ def metrics_from_file_tum(file_name):
 
     plot_result(positions, gt_t, euler_angles, gt_euler)
 
-# if __name__ == "__main__":
+if __name__ == "__main__":
 
-#     ### Main configuration ###
-#     parser = argparse.ArgumentParser()
-#     parser.add_argument(
-#         "--maindir",
-#         type=Path,
-#         # default="/uczelnia/Repositorium/superpoint-fpga/SuperPoint",
-#         default=''
-#     )
-#     parser.add_argument(
-#         "--superglue_weights", type=str, default="weights/superglue_indoor.pth"
-#     )
+    ### Main configuration ###
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--maindir",
+        type=Path,
+        # default="/uczelnia/Repositorium/superpoint-fpga/SuperPoint",
+        default=''
+    )
+    parser.add_argument(
+        "--superglue_weights", type=str, default="weights/superglue_indoor.pth"
+    )
 
-#     parser.add_argument("--vo_type", type=str, default="rgb")  # [rgb, rgbd]
-#     parser.add_argument("--database", type=str, default="tum")  # [tum, kitti]
-#     parser.add_argument("--network", type=str, default="weights/superpoint_v1.pth")
-#     parser.add_argument(
-#         "--kittidir",
-#         type=Path,
-#         # default="/uczelnia/Repositorium/superpoint-fpga/data_odometry_color/dataset",
-#         default="data/dataset"
-#     )
-#     parser.add_argument(
-#         "--tumdir",
-#         type=Path,
-#         # default="/uczelnia/Repositorium/superpoint-fpga/SuperPoint/data",
-#         default="data"
-#     )
+    parser.add_argument("--vo_type", type=str, default="rgb")  # [rgb, rgbd]
+    parser.add_argument("--database", type=str, default="tum")  # [tum, kitti]
+    parser.add_argument("--network", type=str, default="weights/superpoint_v1.pth")
+    parser.add_argument(
+        "--kittidir",
+        type=Path,
+        # default="/uczelnia/Repositorium/superpoint-fpga/data_odometry_color/dataset",
+        default="data/dataset"
+    )
+    parser.add_argument(
+        "--tumdir",
+        type=Path,
+        # default="/uczelnia/Repositorium/superpoint-fpga/SuperPoint/data",
+        default="data"
+    )
     
-#     parser.add_argument("--tum_seq", type=str, default="rgbd_dataset_freiburg1_xyz")
-#     parser.add_argument("--kitti_seq", type=str, default="00")
-#     parser.add_argument("--kitti_gt", type=Path, default="data/datasets/poses/00.txt")
-#     parser.add_argument("--start", type=int, default=0)
-#     parser.add_argument("--end", type=int, default=200)
-#     parser.add_argument("--viz", action="store_true", default=True)
-#     parser.add_argument("--show_img", action="store_true")
-#     parser.add_argument("--plot", action="store_true")
-#     parser.add_argument("--save_trajectory", action="store_true")
-#     args = parser.parse_args()
+    parser.add_argument("--tum_seq", type=str, default="rgbd_dataset_freiburg1_xyz")
+    parser.add_argument("--kitti_seq", type=str, default="00")
+    parser.add_argument("--kitti_gt", type=Path, default="data/datasets/poses/00.txt")
+    parser.add_argument("--start", type=int, default=0)
+    parser.add_argument("--end", type=int, default=200)
+    parser.add_argument("--viz", action="store_true", default=True)
+    parser.add_argument("--show_img", action="store_true")
+    parser.add_argument("--plot", action="store_true")
+    parser.add_argument("--save_trajectory", action="store_true")
+    args = parser.parse_args()
 
-#     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-#     print(f"Using device: {device}")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
 
-#     comment = "416x128_SuperPoint_SuperGlue"
+    comment = "416x128_SuperPoint_SuperGlue"
 
-#     if args.database == "tum":
-#         file = args.tumdir / args.tum_seq
-#         gt_t, gt_euler, time_array = get_gt(args.start, args.end, file)
-#         file_image = file / "rgb"
-#     if args.database == "kitti":
-#         groundtruth = args.kittidir / "poses" / f"{args.kitti_seq}.txt"
+    if args.database == "tum":
+        file = args.tumdir / args.tum_seq
+        gt_t, gt_euler, time_array = get_gt(args.start, args.end, file)
+        file_image = file / "rgb"
+    if args.database == "kitti":
+        groundtruth = args.kittidir / "poses" / f"{args.kitti_seq}.txt"
 
-#         pose = file_interface.read_kitti_poses_file(groundtruth)
-#         gt_t = pose.positions_xyz[args.start : args.end]
-#         quaternions = pose.orientations_quat_wxyz[args.start : args.end]
-#         quats_xyzw = quaternions[:, [1, 2, 3, 0]]
+        pose = file_interface.read_kitti_poses_file(groundtruth)
+        gt_t = pose.positions_xyz[args.start : args.end]
+        quaternions = pose.orientations_quat_wxyz[args.start : args.end]
+        quats_xyzw = quaternions[:, [1, 2, 3, 0]]
 
-#         gt_rot = R.from_quat(quats_xyzw)  # scipy używa kolejności: x, y, z, w
-#         gt_euler = gt_rot.as_euler("zyx", degrees=True)  # yaw, pitch, roll
-#         file_image = args.kittidir / "sequences" / args.kitti_seq / "image_0"
+        gt_rot = R.from_quat(quats_xyzw)  # scipy używa kolejności: x, y, z, w
+        gt_euler = gt_rot.as_euler("zyx", degrees=True)  # yaw, pitch, roll
+        file_image = args.kittidir / "sequences" / args.kitti_seq / "image_0"
 
-#     trajectory, est_euler = compute_sequence(
-#         file_image,
-#         gt_t,
-#         gt_euler[0],
-#         "bf",
-#         args.database,
-#         args=args,
-#         depth_image_folder=file / "depth" if args.database == "tum" else None,
-#     )
+    trajectory, est_euler = compute_sequence(
+        file_image,
+        gt_t,
+        gt_euler[0],
+        "bf",
+        args.database,
+        args=args,
+        depth_image_folder=file / "depth" if args.database == "tum" else None,
+    )
 
-#     if args.database == "tum":
-#         quaternions = R.from_euler("zyx", est_euler, degrees=True).as_quat()
-#         groundtruth = file / "groundtruth.txt"
-#         corect_trajectory(
-#             groundtruth, quaternions, time_array, args.tum_seq, trajectory
-#         )
-#         save_trajectory(
-#             trajectory,
-#             est_euler,
-#             time_array,
-#             args.maindir / "results/generated_trajectory.txt",
-#         )
-#     if args.database == "kitti":
-#         metrics(trajectory, est_euler, pose, args)
-#     save_trajectory_with_euler(
-#         args.maindir
-#         / f"results/{args.database}_{args.kitti_seq}_{args.start}_{args.end}_{comment}.txt",
-#         trajectory,
-#         est_euler,
-#     )
-#     if args.viz:
-#         plot_result(trajectory, gt_t, est_euler, gt_euler)
+    if args.database == "tum":
+        quaternions = R.from_euler("zyx", est_euler, degrees=True).as_quat()
+        groundtruth = file / "groundtruth.txt"
+        corect_trajectory(
+            groundtruth, quaternions, time_array, args.tum_seq, trajectory
+        )
+        save_trajectory(
+            trajectory,
+            est_euler,
+            time_array,
+            args.maindir / "results/generated_trajectory.txt",
+        )
+    if args.database == "kitti":
+        metrics(trajectory, est_euler, pose, args)
+    save_trajectory_with_euler(
+        args.maindir
+        / f"results/{args.database}_{args.kitti_seq}_{args.start}_{args.end}_{comment}.txt",
+        trajectory,
+        est_euler,
+    )
+    if args.viz:
+        plot_result(trajectory, gt_t, est_euler, gt_euler)
 
-# if args.database == "kitti":
-#     metrics_from_file(args.kittidir / "poses" / f"{args.kitti_seq}.txt", comment, args)
+if args.database == "kitti":
+    metrics_from_file(args.kittidir / "poses" / f"{args.kitti_seq}.txt", comment, args)
 
-scene = "00"
-database = 'tum'
-start = 0
-end = 200
-comment = "test"
-file_name = "tum_not_int8t.txt"
-data1 = np.loadtxt("results//00_soft (1).txt", skiprows=1)
-SuperPoint_bf = data1[:, 0:3][start:end]
-metrics_from_file_tum(file_name)
-
-
-# data2 = np.loadtxt("results//00_416.txt", skiprows=1)
-# SuperPoint_SuperGlue = data2[:, 0:3][start:end]
-
-# data3 = np.loadtxt("results//kitti_00_1_4540_416x128_Sift_bf.txt", skiprows=1)
-# Sift_bf = data3[:, 0:3][start:end]
-# euler_angles = data3[:, 3:6][start:end]
-
-# groundtruth = "data//dataset//poses//" + f"{scene}.txt"
-# pose = file_interface.read_kitti_poses_file(groundtruth)
-# poses = pose.positions_xyz[start:end]
-# tx_SuperPoint_bf, ty_SuperPoint_bf, tz_SuperPoint_bf = SuperPoint_bf[:, 0], SuperPoint_bf[:, 1], SuperPoint_bf[:, 2]
-# tx_SuperPoint_SuperGlue, ty_SuperPoint_SuperGlue, tz_SuperPoint_SuperGlue = SuperPoint_SuperGlue[:, 0], SuperPoint_SuperGlue[:, 1], SuperPoint_SuperGlue[:, 2]
-# tx_Sift_bf, ty_Sift_bf, tz_Sift_bf = Sift_bf[:, 0], Sift_bf[:, 1], Sift_bf[:, 2]
-
-# tx, ty, tz = poses[:, 0], poses[:, 1], poses[:, 2]
-
-# # Wykres 3D
-# fig = plt.figure()
-# ax = fig.add_subplot(111, projection='3d')
-# ax.plot(tx_SuperPoint_bf, ty_SuperPoint_bf, tz_SuperPoint_bf, label='Softmax DPU', color='red')
-# ax.plot(tx_SuperPoint_SuperGlue, ty_SuperPoint_SuperGlue, tz_SuperPoint_SuperGlue, label='Softmax CPU', color='green')
-# # ax.plot(tx_Sift_bf, ty_Sift_bf, tz_Sift_bf, label='Sift_bf', color='gray')
-
-# ax.plot(tx, ty, tz, label='Ground truth', color='blue')
-
-# ax.scatter(tx_SuperPoint_bf[0], ty_SuperPoint_bf[0], tz_SuperPoint_bf[0], color='black', marker='o', s=50, label='Punkt startowy')
-# ax.set_xlabel("X")
-# ax.set_ylabel("Y")
-# ax.set_zlabel("Z")
-# ax.set_title("Trajektoria estymowana")
-# x_limits = ax.get_xlim3d()
-# y_limits = ax.get_ylim3d()
-# z_limits = ax.get_zlim3d()
-
-# x_range = abs(x_limits[1] - x_limits[0])
-# y_range = abs(y_limits[1] - y_limits[0])
-# z_range = abs(z_limits[1] - z_limits[0])
-
-# max_range = max(x_range, y_range, z_range)
-
-# # wyśrodkuj osie
-# mid_x = np.mean(x_limits)
-# mid_y = np.mean(y_limits)
-# mid_z = np.mean(z_limits)
-
-# ax.set_xlim(mid_x - max_range/2, mid_x + max_range/2)
-# ax.set_ylim(mid_y - max_range/2, mid_y + max_range/2)
-# ax.set_zlim(mid_z - max_range/2, mid_z + max_range/2)
-# ax.legend()
-# plt.show()
+# scene = "00"
+# database = 'tum'
+# start = 0
+# end = 200
+# comment = "test"
+# file_name = "tum_not_int8t.txt"
+# data1 = np.loadtxt("results//00_soft (1).txt", skiprows=1)
+# SuperPoint_bf = data1[:, 0:3][start:end]
+# metrics_from_file_tum(file_name)
