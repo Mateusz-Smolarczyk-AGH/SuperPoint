@@ -289,7 +289,7 @@ def plot_result(
         plt.grid(True)
 
     plt.xlabel("Time")
-    plt.suptitle("Euler angles (Estymacja vs GT)")
+    plt.suptitle("Euler angles (Estimation vs GT)")
     plt.tight_layout()
     plt.show()
 
