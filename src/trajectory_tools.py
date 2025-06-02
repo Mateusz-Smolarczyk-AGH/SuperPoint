@@ -367,7 +367,7 @@ def metrics(
         print(f"RPE ({relation.name}): RMSE = {stats['rmse']:.4f}")
 
 
-def metrics_from_file(scene: str, start: int, end: int, file_name: str) -> None:
+def metrics_from_file(groundtruth: str, start: int, end: int, file_name: str) -> None:
     """
     Loads trajectory and Euler angle data from file, computes APE and RPE metrics,
     prints total trajectory length and frame count, and plots trajectory and orientation comparison.
@@ -382,7 +382,6 @@ def metrics_from_file(scene: str, start: int, end: int, file_name: str) -> None:
     data = np.loadtxt("saved_trajectories//" + file_name, skiprows=1)
     positions = data[:, 0:3][start:end]
     euler_angles = data[:, 3:6][start:end]
-    groundtruth = "data//dataset//poses//" + f"{scene}.txt"
     pose = file_interface.read_kitti_poses_file(groundtruth)
     metrics(positions, euler_angles, pose, start, end)
     poses = pose.positions_xyz[start:end]
@@ -401,7 +400,7 @@ def metrics_from_file(scene: str, start: int, end: int, file_name: str) -> None:
     plot_result(positions, poses, euler_angles, gt_euler)
 
 
-def metrics_from_file_tum(scene: str, start: int, end: int, file_name: str) -> None:
+def metrics_from_file_tum(groundtruth: str, start: int, end: int, file_name: str) -> None:
     """
     Loads trajectory and Euler angle data from file, computes APE and RPE metrics,
     prints total trajectory length and frame count, and plots trajectory and orientation comparison.
@@ -418,7 +417,6 @@ def metrics_from_file_tum(scene: str, start: int, end: int, file_name: str) -> N
     positions, euler_angles, time_array = load_trajectory("saved_trajectories//" + file_name)
     positions = positions[start:end]
     euler_angles = euler_angles[start:end]
-    groundtruth = Path("data//" + scene)
     # quaternions = R.from_euler("zyx", euler_angles, degrees=True).as_quat()
 
     # corect_trajectory(

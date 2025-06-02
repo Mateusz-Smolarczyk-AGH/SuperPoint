@@ -15,14 +15,45 @@ os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 
 
 def compute_sequence(
-    image_folder,
-    t_gt,
-    start_r,
-    matching_type,
-    database="tum",
+    image_folder: str,
+    t_gt: np.ndarray,
+    start_r: np.ndarray,
+    matching_type: str,
+    database: str = "tum",
     args=None,
-    depth_image_folder=None,
-):
+    depth_image_folder: str = None,
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Computes the camera trajectory and rotations from a sequence of images using SuperPoint and SuperGlue.
+
+    Parameters
+    image_folder : str
+        Path to the folder containing RGB images.
+    
+    t_gt : np.ndarray
+        Ground truth camera positions, shape (N, 3).
+    
+    start_r : np.ndarray
+        Initial Euler angles [yaw, pitch, roll] in degrees, shape (3,).
+    
+    matching_type : str
+        Type of feature matching used, e.g., 'bf' (brute-force).
+    
+    database : str, optional
+        Dataset type: 'tum' or 'kitti'. Default is 'tum'.
+    
+    args : argparse.Namespace
+        Parsed command-line arguments containing network weights, VO settings, image size, etc.
+    
+    depth_image_folder : str, optional
+        Path to the folder containing depth images. Required if `args.vo_type == 'rgbd'`.
+
+    Returns
+    -------
+    tuple of np.ndarray
+        - Estimated camera trajectory, shape (N, 3).
+        - List of rotation matrices or Euler angles per frame, shape (N, 3, 3) or (N, 3).
+    """
     pre_times = []
     net_times = []
     post_times = []
@@ -57,7 +88,7 @@ def compute_sequence(
             d1=0.0,
             d2=0.0,
             d3=0.0,
-            d4=0.0,  # brak danych o dystorsji w P
+            d4=0.0, 
         )
     # camera = processing.PinholeCamera(520.9, 521.0, 325.1, 249.7, 0.2312, -0.7849, -0.0033, -0.0001, 0.9172)
     K_l = np.array(
@@ -67,7 +98,6 @@ def compute_sequence(
     start_t = t_gt[0]
     t_start = np.array([[start_t[0]], [start_t[1]], [start_t[2]]])
 
-    # Rotacja z kwaternionu
     r = R.from_euler("zyx", start_r, degrees=True)
     start_R = r.as_matrix()
 
@@ -81,10 +111,10 @@ def compute_sequence(
         )
         cv2.imshow("Depth", first_depth_image)
 
-        # first_image = processing.depth_to_rgb(depth_image)
-        # first_image = cv2.resize(first_image, (first_image.shape[1], first_image.shape[0]))
-    image_size = (first_image.shape[1], first_image.shape[0])
-    # image_size = (416, 128)
+    if args.image_size is None:
+        image_size = (first_image.shape[1], first_image.shape[0])
+    else:
+        image_size = args.image_size
     # first_image, offset = processing.crop_center(first_image, image_size)
     # camera.cx=camera.cx - offset[0]
     # camera.cy=camera.cy - offset[1]
@@ -95,13 +125,6 @@ def compute_sequence(
     camera.fy = camera.fy * scale_y
     camera.cx = camera.cx * scale_x
     camera.cy = camera.cy * scale_y
-
-    # if database == "tum":
-    #     first_image = cv2.resize(first_image, (image_size[0] + 32, image_size[1] + 16))
-    #     first_image = cv2.undistort(first_image, K_l, camera.d)
-    #     first_image = first_image[8:-8, 16:-16, :]
-    # else:
-    #     first_image = cv2.resize(first_image, image_size)
 
     odometry = processing.VisualOdometry(
         args,
@@ -146,7 +169,6 @@ def compute_sequence(
 
         cv2.imshow("Film", odometry.feature_detection.input_image)
 
-        # Czekaj 30 ms na kolejny obraz (około 30 FPS)
         if cv2.waitKey(1) & 0xFF == ord("q"):
             break
 
@@ -189,7 +211,7 @@ if __name__ == "__main__":
         "--superglue_weights", type=str, default="weights/superglue_indoor.pth"
     )
 
-    parser.add_argument("--vo_type", type=str, default="rgb")  # [rgb, rgbd]
+    parser.add_argument("--vo_type", type=str, default="rgb")  # [rgb, rgbd] rgbd only for TUM
     parser.add_argument("--database", type=str, default="tum")  # [tum, kitti]
     parser.add_argument("--network", type=str, default="weights/superpoint_v1.pth")
     parser.add_argument(
@@ -214,6 +236,15 @@ if __name__ == "__main__":
     parser.add_argument("--show_img", action="store_true")
     parser.add_argument("--plot", action="store_true")
     parser.add_argument("--save_trajectory", action="store_true")
+    parser.add_argument(
+    "--image_size", 
+    type=int, 
+    nargs=2, 
+    default=None, 
+    metavar=('WIDTH', 'HEIGHT'),
+    help="Size of the input image as (width height)"
+)
+
     args = parser.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -260,7 +291,7 @@ if __name__ == "__main__":
             args.maindir / "saved_trajectories/generated_trajectory.txt",
         )
     if args.database == "kitti":
-        metrics(trajectory, est_euler, pose, args, args.start, args.end)
+        metrics(trajectory, est_euler, pose, args.start, args.end)
     save_trajectory_with_euler(
         args.maindir
         / f"saved_trajectories/{args.database}_{args.kitti_seq}_{args.start}_{args.end}_{comment}.txt",
@@ -271,14 +302,6 @@ if __name__ == "__main__":
         plot_result(trajectory, gt_t, est_euler, gt_euler)
 
 if args.database == "kitti":
-    metrics_from_file(args.kittidir / "poses" / f"{args.kitti_seq}.txt", comment, args)
-
-# scene = "00"
-# database = 'tum'
-# start = 0
-# end = 200
-# comment = "test"
-# file_name = "tum_not_int8t.txt"
-# data1 = np.loadtxt("saved_trajectories//00_soft (1).txt", skiprows=1)
-# SuperPoint_bf = data1[:, 0:3][start:end]
-# metrics_from_file_tum(file_name)
+    metrics_from_file(args.kittidir / "poses" / f"{args.kitti_seq}.txt", args.start, args.end, "generated_trajectory.txt")
+if args.database == "tum":
+    metrics_from_file_tum(args.tumdir / f"{args.tum_seq}", args.start, args.end, "generated_trajectory.txt")
