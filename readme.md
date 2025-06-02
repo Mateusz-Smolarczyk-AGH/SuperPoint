@@ -1,39 +1,66 @@
-# Realizacja odometrii wizyjnej z wykorzystaniem sieci SuperPoint oraz zasobów sprzętowych Kria KV260
+# Visual Odometry Using SuperPoint and Kria KV260 Hardware Acceleration
 
-Projekt realizuje zadanie **odometrii wizyjnej** przy użyciu wstępnie wytrenowanej sieci [SuperPoint](https://github.com/magicleap/SuperPointPretrainedNetwork), która umożliwia: detekcję punktów charakterystycznych oraz obliczanie ich deskryptorów. Następnie zostaje wykonane dopasowanie punktów między kolejnymi klatkami obrazu z kamery. Umożliwia to estymację **rotacji** i **translacji** kamery na podstawie homografii.
+This project implements **visual odometry** using the pretrained neural network [SuperPoint](https://github.com/magicleap/SuperPointPretrainedNetwork), which detects keypoints and extracts local descriptors from images. The model has been quantized and optimized to run on the Xilinx Kria KV260 platform using the Vitis AI toolkit.
 
-## Struktura repozytorium
+## Project Goals
 
-Projekt podzielony jest na kilka modułów:
+- Apply the SuperPoint model for visual odometry (estimating the trajectory of a camera from video frames),
+- Optimize and deploy the model on embedded hardware (Kria KV260 FPGA),
+- Compare performance between the original and quantized versions of the model.
+
+## How It Works
+
+The project estimates the **camera trajectory** (its position and orientation in space) from a sequence of input images. Such approaches are commonly used in autonomous robots, drones, and vehicles.
+
+### Main Processing Steps
+
+1. **Keypoint Detection**  
+   For each frame, the **SuperPoint** network is used to detect keypoints and extract corresponding descriptors that capture local image features.
+
+2. **Keypoint Matching**  
+   Keypoints between consecutive frames are matched using either a simple Brute-Force (BF) matcher or the more advanced **SuperGlue** model, which leverages spatial context.
+
+3. **Outlier Rejection**  
+   To eliminate incorrect matches (outliers), a **homography** is estimated between frames, and RANSAC is used to filter inconsistent points.
+
+4. **Motion Estimation**  
+   Based on the filtered keypoint pairs, the relative camera motion is estimated via **rotation** and **translation** matrices.  
+   The project supports two approaches:
+   - **With depth information** (e.g. from depth maps or stereo): 3D pose estimation,
+   - **Without depth**: using only 2D projections for approximate motion estimation.
+
+## Repository Structure
+
+The project is organized into several modules:
 
 ### 📁 `src/`
-Zawiera plik `launch_new.py`, który uruchamia cały pipeline na komputerze PC i wyznacza trajektorię przebytą przez kamerę.
+Contains source files responsible for the entire visual odometry pipeline and evaluation.  
+To run visual odometry on PC (without quantization), use:
+```bash
+python src/launch_new.py
+```
 
-### 📁 `kria_evaluation/`
-Zawiera skrypt odpowiedzialny za:
+### 📁 Quantization/
+Contains scripts for:
 
-- **kwantyzację** sieci,
-- **kompilację** modelu do uruchomienia na **DPU** platformy Kria KV260.
+- **Quantizing** the SuperPoint network,
+- **Compiling** the model for deployment on the **Kria KV260 DPU**.
 
-> Do uruchomienia tej części należy wykorzystać obraz Dockera z **Vitis AI**.
+> 🚀 To run this part, use the **Vitis AI Docker image**.
 
-### 📁 `Kria_run/`
-Zawiera skrypt do:
+### 📁 Kria_run/
+Contains scripts for:
 
-- uruchomienia skompilowanej sieci,
-- ewaluacji modelu na sprzęcie docelowym (Kria KV260).
+- Running the compiled model,
+- Evaluating the model on the target hardware (**Kria KV260**).
 
-## Zbiory danych
+## Datasets
 
-Projekt był testowany na następujących bazach danych:
+The project was tested on the following datasets:
 
-- [HPatches](https://github.com/hpatches/hpatches-dataset),
-- [KITTI](http://www.cvlibs.net/datasets/kitti/),
-- [TUM RGB-D](https://vision.in.tum.de/data/datasets/rgbd-dataset).
-
----
-
-> 💡 Jeśli masz pytania lub sugestie dotyczące tego repozytorium – zapraszam do kontaktu lub zgłaszania issue.
+- [HPatches](https://github.com/hpatches/hpatches-dataset) – for feature matching evaluation,
+- [KITTI](http://www.cvlibs.net/datasets/kitti/) – for outdoor visual odometry,
+- [TUM RGB-D](https://vision.in.tum.de/data/datasets/rgbd-dataset) – for indoor RGB-D sequences.
 
 <!--
 
