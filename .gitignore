@@ -6,3 +6,11 @@ outputs_batch_**
 **.pyc
 data/rgbd_dataset_**
 kria_evaluation/data_pt/**
+src/launch_gpu.py
+src/launch_old.py
+src/launch.py
+src/backup.py
+src/matching_evaluation.ipynb
+src/temp.py
+Quantization/.ipynb_checkpoints**
+Quantization/__pycache__**
