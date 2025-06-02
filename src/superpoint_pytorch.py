@@ -1,15 +1,29 @@
-"""PyTorch implementation of the SuperPoint model,
-   derived from the TensorFlow re-implementation (2018).
-   Authors: Rémi Pautrat, Paul-Edouard Sarlin
-"""
 import time
 import torch.nn as nn
 import torch
 from collections import OrderedDict
 from types import SimpleNamespace
 
+""" 
+PyTorch implementation of the SuperPoint model,
+derived from the TensorFlow re-implementation (2018).
+Authors: Rémi Pautrat, Paul-Edouard Sarlin
+Source: https://github.com/rpautrat/SuperPoint
+Weights: weights\superpoint_v6_from_tf.pth
+
+"""
 def sample_descriptors(keypoints, descriptors, s: int = 8):
-    """Interpolate descriptors at keypoint locations"""
+    """
+    Interpolates descriptors at keypoint locations.
+    
+    Args:
+        keypoints (Tensor): [N, 2] tensor with (x, y) keypoint coordinates.
+        descriptors (Tensor): [1, C, Hc, Wc] dense descriptor map.
+        s (int): Stride of the output feature map with respect to input image.
+
+    Returns:
+        Tensor: [C, N] interpolated descriptors at keypoint locations.
+    """
     b, c, h, w = descriptors.shape
     keypoints = (keypoints + 0.5) / (keypoints.new_tensor([w, h]) * s)
     keypoints = keypoints * 2 - 1  # normalize to (-1, 1)
@@ -23,6 +37,16 @@ def sample_descriptors(keypoints, descriptors, s: int = 8):
 
 
 def batched_nms(scores, nms_radius: int):
+    """
+    Performs non-maximum suppression (NMS) on a dense score map using max pooling.
+
+    Args:
+        scores (Tensor): [B, 1, H, W] score maps.
+        dist_thresh (int): Distance threshold for NMS suppression window.
+
+    Returns:
+        Tensor: NMS-suppressed score maps of the same shape.
+    """
     assert nms_radius >= 0
 
     def max_pool(x):
@@ -172,6 +196,13 @@ class SuperPoint(nn.Module):
 
 
 class SuperPoint_short(nn.Module):
+    """
+    Modified version with adjusted post-processing.
+
+    Some elements have been moved outside the network's forward pass 
+    into a separate function to enable better comparison with the quantized model, 
+    as certain post-processing operations are not supported during quantization.
+    """
     default_conf = {
         "nms_radius": 4,
         "max_num_keypoints": 500,
@@ -228,6 +259,25 @@ class SuperPoint_short(nn.Module):
         return scores, descriptors_dense
     
     def post_processing(scores, descriptors_dense):
+        """
+        Performs post-processing on the raw network outputs to extract keypoints and their descriptors.
+
+        Steps:
+        1. Applies Non-Maximum Suppression (NMS) with a fixed radius to filter out non-local maxima.
+        2. Selects keypoints with confidence score above a threshold (0.005).
+        3. Converts keypoint coordinates to (x, y) format and casts them to float.
+        4. Normalizes the dense descriptor map.
+        5. Samples descriptors at the selected keypoint locations.
+
+        Args:
+            scores (torch.Tensor): Heatmap with confidence scores for keypoints, shape [1, H, W].
+            descriptors_dense (torch.Tensor): Dense descriptor map from the network, shape [1, C, Hc, Wc].
+
+        Returns:
+            Tuple[torch.Tensor, torch.Tensor]:
+                - scores_all (torch.Tensor): Confidence scores of the selected keypoints, shape [N].
+                - descriptors (torch.Tensor): Corresponding descriptors, shape [C, N].
+        """
         scores = batched_nms(scores, 4)
         scores = scores.squeeze(0)
         idxs = torch.where(scores > 0.005)
@@ -241,6 +291,9 @@ class SuperPoint_short(nn.Module):
         return scores_all, descriptors
         
 class SuperPoint_short_quant(nn.Module):
+    """
+    Version of model with addiction quantization functions.
+    """
     default_conf = {
         "nms_radius": 4,
         "max_num_keypoints": 500,
@@ -293,7 +346,11 @@ class SuperPoint_short_quant(nn.Module):
         return self.dequant(scores), self.dequant(descriptors_dense)
     
 class SuperPointNet(torch.nn.Module):
-    """ Pytorch definition of SuperPoint Network. """
+    """ Pytorch definition of SuperPoint Network. 
+        Source: https://github.com/magicleap/SuperPointPretrainedNetwork
+        Version of model without batchNorm.
+        Weights: weights\superpoint_v1.pth
+    """
     default_conf = {
         "nms_radius": 4,
         "max_num_keypoints": 500,

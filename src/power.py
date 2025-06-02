@@ -2,7 +2,8 @@ import matplotlib.pyplot as plt
 import csv
 import os
 
-# Wpisz tutaj nazwy plików CSV do porównania
+# Krótki skrypt do wyświetlenia wyników poboru mocy z KRIA
+
 csv_files = [
     "80x60.csv",
     "160x120.csv",
