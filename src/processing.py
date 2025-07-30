@@ -1,7 +1,9 @@
 import numpy as np
 import cv2
 import torch
-import superpoint_pytorch, superglue
+import superpoint_pytorch
+import superglue
+import brevitas_superpoint
 import os
 from scipy.spatial.transform import Rotation as R
 import time
@@ -35,12 +37,22 @@ class Feature_detection:
     def __init__(self, image_size, camera, database, superpoint_weights=None):
         self.input_image = None
         self.input = None
-        # self.model = superpoint_pytorch.SuperPoint_short(detection_threshold=0.005, nms_radius=5).eval()
-        # self.model.load_state_dict(torch.load("weights/superpoint_v6_from_tf.pth", weights_only=True))
+
         self.model = superpoint_pytorch.SuperPointNet(
             detection_threshold=0.005, nms_radius=5
         ).eval()
-        self.model.load_state_dict(torch.load(superpoint_weights, weights_only=True))
+        self.model.load_state_dict(
+            torch.load(superpoint_weights, weights_only=True)
+        )
+
+        # self.model = brevitas_superpoint.SuperPointNet_pretrained(
+        #     detection_threshold=0.001, nms_radius=3
+        # ).eval()
+
+        # self.model.load_state_dict(
+        #     torch.load(superpoint_weights, weights_only=True)["model_state_dict"]
+        # )
+
         self.database = database
         self.image_size = image_size
         self.K_l = np.array(
@@ -166,6 +178,7 @@ class VisualOdometry:
         self.feature_detection = Feature_detection(
             image_size, cam, database, superpoint_weights
         )
+
         self.R_total = np.eye(3)
         self.start_R = start_R
         self.t_total = np.zeros((3, 1))
@@ -175,12 +188,15 @@ class VisualOdometry:
         self.K = np.array(
             [[cam.fx, 0.0, cam.cx], [0.0, cam.fy, cam.cy], [0.0, 0.0, 1.0]]
         )
+
         self.d = cam.d
         self.trajectory = [self.start_t.flatten().tolist()]
         r = R.from_matrix(start_R)
         angles = r.as_euler("zyx", degrees=True)  # yaw, pitch, roll
         self.R_list = [angles]
         self.matching_type = matching_type
+        self.timestamp = []
+
         if matching_type == "SuperGlue":
             config = {
                 "weights": "indoor",
@@ -282,25 +298,18 @@ class VisualOdometry:
             )
 
     def pose_estimation(self, points1, points2, abs_scale):
-        E, mask = cv2.findEssentialMat(
-            points2,
-            points1,
-            focal=self.focal,
-            pp=self.pp,
-            method=cv2.RANSAC,
-            prob=0.999,
-            threshold=1.0,
-        )
-        # best_num_inliers = 0
-        # for _E in np.split(E, len(E) / 3):
-        #     n, R_temp, t_temp, _ = cv2.recoverPose(
-        #         _E, points2, points1, focal=self.focal, pp=self.pp, mask=mask)
-        #     if n > best_num_inliers:
-        #         best_num_inliers = n
-        #         R_diff, t = R_temp, t_temp
-        #         # ret = (R, t[:, 0], mask.ravel() > 0)
 
         if self.args.vo_type == "rgb":
+            E, mask = cv2.findEssentialMat(
+                points2,
+                points1,
+                focal=self.focal,
+                pp=self.pp,
+                method=cv2.RANSAC,
+                prob=0.999,
+                threshold=1.0,
+            )
+
             points, R_diff, t, mask = cv2.recoverPose(
                 E,
                 points2[mask.ravel().astype(bool)],
@@ -330,8 +339,16 @@ class VisualOdometry:
 
             abs_scale = 1
 
+        # print("R_diff: ", R_diff)
+        # print("t: ", t)
+
         angles_change = R.from_matrix(R_diff).as_euler("zyx", degrees=True)
-        if np.any(np.abs(angles_change) > 15):
+        translation_change = np.linalg.norm(t)
+        if (
+            np.any(np.abs(angles_change) > 15)
+            or translation_change > 10e3
+            or translation_change < 10e-3
+        ):
             return 1
 
         self.t_total = self.t_total + abs_scale * self.R_total.dot(t)
@@ -389,6 +406,7 @@ class VisualOdometry:
         self.feature_detection.get_input(image)
         pre = time.perf_counter()
         # superPoint
+
         self.present_predictions["raw"], net, post = (
             self.feature_detection.process_Superpoint()
         )
@@ -441,9 +459,22 @@ class VisualOdometry:
             sg_valid = sg_matches > -1
             m_kp1 = sg_kpts0[sg_valid]
             m_kp2 = sg_kpts1[sg_matches[sg_valid]]
-            H, inliers = self.compute_homography(m_kp1, m_kp2)
-            pts1 = m_kp1[inliers.astype(bool)]
-            pts2 = m_kp2[inliers.astype(bool)]
+
+            print("sg_matches: ", len(sg_matches))
+            print("sg_valid: ", len(sg_valid))
+            print("m_kp1: ", len(m_kp1))
+            print("m_kp2: ", len(m_kp2))
+
+            if len(m_kp1) < 20 or len(m_kp2) < 20:
+                self.trajectory.append(self.trajectory[-1])
+                self.R_list.append(self.R_list[-1])
+                return 1, (pre - start, net, post, 0, len(m_kp1))
+
+            # H, inliers = self.compute_homography(m_kp1, m_kp2)
+            pts1 = m_kp1
+            pts2 = m_kp2
+            # print("pts1: ", len(pts1))
+            # print("pts2: ", len(pts2))
 
         end = time.perf_counter()
         # pose estimation
@@ -457,9 +488,17 @@ class VisualOdometry:
         result = self.pose_estimation(pts1, pts2, abs_scale)
         r_global = self.start_R.dot(self.R_total)
         r = R.from_matrix(r_global)
+
         angles = r.as_euler("zyx", degrees=True)  # yaw, pitch, roll
         self.R_list.append(angles)
+
         # trac = self.t_total + self.start_t
+
+        # print("R_total: ", self.R_total)
+        # print("t_total: ", self.t_total)
+        # print("start_t: ", self.start_t)
+        # print("start_R: ", self.start_R)
+
         trac = self.start_R.dot(self.t_total) + self.start_t
         self.trajectory.append(trac.flatten().tolist())
         self.show_arrows(pts1, pts2)
