@@ -1,5 +1,7 @@
 # /bin/python3
 
+import matplotlib
+matplotlib.use('TkAgg') 
 from matplotlib import pyplot as plt
 import numpy as np
 import cv2
@@ -19,6 +21,7 @@ import torch
 from tqdm import tqdm
 
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
+
 
 
 def plot_trajectory(
@@ -80,6 +83,7 @@ def compute_sequence(
     database="tum",
     args=None,
     depth_image_folder=None,
+    gt_timestamps=None,
 ):
     pre_times = []
     net_times = []
@@ -91,6 +95,7 @@ def compute_sequence(
     image_files = sorted(
         [f for f in os.listdir(image_folder) if f.endswith((".png", ".jpg", ".ppm"))]
     )
+
 
     if depth_image_folder is not None and args.vo_type == "rgbd":
         depth_image_files = sorted(
@@ -137,8 +142,8 @@ def compute_sequence(
             os.path.join(depth_image_folder, depth_image_files[args.start]),
             cv2.IMREAD_UNCHANGED,
         )
-        cv2.imshow("Depth", first_depth_image)
-
+        # cv2.imshow("Depth", first_depth_image)
+        
         # first_image = processing.depth_to_rgb(depth_image)
         # first_image = cv2.resize(first_image, (first_image.shape[1], first_image.shape[0]))
     image_size = (first_image.shape[1], first_image.shape[0])
@@ -174,7 +179,10 @@ def compute_sequence(
     )
 
     odometry.compute_first_image(first_image, first_depth_image)
+    odometry.timestamp.append(gt_timestamps[0])
 
+    recompute_previous_fps = False
+    skipped_frames = 0
     depth_image = None
     for i in tqdm(range(args.start + 1, args.end)):
         # print(f"Processing: {(i-(args.start+1))/(args.end-args.start+1) * 100}%")
@@ -188,18 +196,34 @@ def compute_sequence(
                 cv2.IMREAD_UNCHANGED,
             )
 
-            cv2.imshow("Depth", depth_image)
+            # cv2.imshow("Depth", depth_image)
+            # cv2.waitKey(0)
 
         skip_frame, time = odometry.compute_pipeline(
             image, t_gt[i - args.start], t_gt[i - args.start - 1], depth_image
         )
-        if skip_frame == 0:
+        odometry.timestamp.append(gt_timestamps[i - args.start])
+        
+        if skip_frame == 1:
+            skipped_frames += 1
+        
+        if skipped_frames > 5:
+            recompute_previous_fps = True
+            skipped_frames = 0
+        
+        if skip_frame == 0 or recompute_previous_fps:
+            
+            if recompute_previous_fps:
+                print("Recomputing previous FPS")
+            
             odometry.past_predictions = odometry.present_predictions.copy()
-
+            
             if args.vo_type == "rgbd":
                 odometry.past_depth = odometry.present_depth.copy()
+                
+            recompute_previous_fps = False
 
-        cv2.imshow("Film", odometry.feature_detection.input_image)
+        cv2.imshow("Seq", odometry.feature_detection.input_image)
 
         # Czekaj 30 ms na kolejny obraz (około 30 FPS)
         if cv2.waitKey(1) & 0xFF == ord("q"):
@@ -222,7 +246,7 @@ def compute_sequence(
     print(
         f"Średnie czasy (ms): pre: {avg_pre:.6f} | net: {avg_net:.6f} | post: {avg_post:.6f} | matching: {avg_matching:.6f} | all: {avg_all:.6f} | matches: {avg_matches:.6f}"
     )
-    return np.array(odometry.trajectory), np.array(odometry.R_list)
+    return np.array(odometry.trajectory), np.array(odometry.R_list), np.array(odometry.timestamp)
 
 
 def get_gt(start, end, file):
@@ -274,7 +298,7 @@ def save_trajectory(t, euler_angles, time_array, output_file):
     )
 
     # Zapisz do pliku
-    np.savetxt(output_file, output_data, fmt="%.4f")
+    np.savetxt(output_file, output_data)
 
 
 def normalized_ape(gt_coords, est_coords):
@@ -328,8 +352,8 @@ def plot_result(trajectory, gt_t, est_euler, gt_euler):
     # Wykres 3D
     fig = plt.figure()
     ax = fig.add_subplot(111, projection="3d")
-    ax.plot(tx_est, ty_est, tz_est, label="Trajektoria estymowana", color="red")
-    ax.plot(tx, ty, tz, label="Trajektoria GT", color="blue")
+    ax.plot(tx_est, ty_est, tz_est, label="Estimated", color="red")
+    ax.plot(tx, ty, tz, label="Ground truth", color="blue")
 
     ax.scatter(
         tx_est[0],
@@ -338,12 +362,12 @@ def plot_result(trajectory, gt_t, est_euler, gt_euler):
         color="black",
         marker="o",
         s=50,
-        label="Punkt startowy",
+        label="Starting point",
     )
     ax.set_xlabel("X")
     ax.set_ylabel("Y")
     ax.set_zlabel("Z")
-    ax.set_title("Trajektoria estymowana")
+    # ax.set_title("Trajektoria estymowana")
     x_limits = ax.get_xlim3d()
     y_limits = ax.get_ylim3d()
     z_limits = ax.get_zlim3d()
@@ -369,15 +393,15 @@ def plot_result(trajectory, gt_t, est_euler, gt_euler):
     labels = ["Yaw (Z)", "Pitch (Y)", "Roll (X)"]
     for i in range(3):
         plt.subplot(3, 1, i + 1)
-        plt.plot(est_euler[:, i], label="Estymowane")
+        plt.plot(est_euler[:, i], label="Estimated")
         plt.plot(gt_euler[:, i], label="Ground Truth", linestyle="--")
 
         plt.ylabel(labels[i])
         plt.legend()
         plt.grid(True)
 
-    plt.xlabel("Krok czasowy")
-    plt.suptitle("Porównanie kątów Eulera kamery (Estymacja vs GT)")
+    plt.xlabel("Timestamp")
+    # plt.suptitle("Porównanie kątów Eulera kamery (Estymacja vs GT)")
     plt.tight_layout()
     plt.show()
 
@@ -456,9 +480,19 @@ if __name__ == "__main__":
         "--superglue_weights", type=str, default="weights/superglue_indoor.pth"
     )
 
-    parser.add_argument("--vo_type", type=str, default="rgb")  # [rgb, rgbd]
+    parser.add_argument("--vo_type", type=str, default="rgbd")  # [rgb, rgbd]
     parser.add_argument("--database", type=str, default="tum")  # [tum, kitti]
-    parser.add_argument("--network", type=str, default="weights/superpoint_v1.pth")
+    # parser.add_argument("--network", type=str, default="/uczelnia/Repositorium/superpoint-fpga/pytorch-superpoint/logs/superpoint_coco_4bity_relu_douczenie/checkpoints/superPointNet_9200_checkpoint.pth.tar")
+    # parser.add_argument("--network",type=str, default="/uczelnia/Repositorium/superpoint-fpga/pytorch-superpoint/logs/superpoint_coco_3bity/checkpoints/superPointNet_190000_checkpoint.pth.tar")
+    # parser.add_argument("--network", type=str, default="/uczelnia/Repositorium/superpoint-fpga/pytorch-superpoint/logs/superpoint_coco/checkpoints/superPointNet_106000_checkpoint.pth.tar")
+    # parser.add_argument("--network", type=str, default="/uczelnia/Repositorium/superpoint-fpga/pytorch-superpoint/logs/superpoint_coco/checkpoints/superPointNet_103200_checkpoint.pth.tar")
+    # parser.add_argument(
+    #     "--network",
+    #     type=str,
+    #     default="/uczelnia/Repositorium/superpoint-fpga/pytorch-superpoint/logs/superpoint_coco_4_2_4_bity/checkpoints/superPointNet_91200_checkpoint.pth.tar",
+    # )
+    parser.add_argument("--network", type=str, default="/uczelnia/Repositorium/superpoint-fpga/SuperPoint/weights/superpoint_v1.pth")
+    
     parser.add_argument(
         "--kittidir",
         type=Path,
@@ -474,11 +508,11 @@ if __name__ == "__main__":
     parser.add_argument("--kitti_seq", type=str, default="00")
     parser.add_argument("--kitti_gt", type=Path, default="datasets/KITTI/poses/00.txt")
     parser.add_argument("--start", type=int, default=0)
-    parser.add_argument("--end", type=int, default=100)
+    parser.add_argument("--end", type=int, default=1241)
     parser.add_argument("--viz", action="store_true", default=True)
     parser.add_argument("--show_img", action="store_true")
     parser.add_argument("--plot", action="store_true")
-    parser.add_argument("--save_trajectory", action="store_true")
+    parser.add_argument("--save_trajectory", default=True, action="store_true")
     args = parser.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -502,7 +536,7 @@ if __name__ == "__main__":
         gt_euler = gt_rot.as_euler("zyx", degrees=True)  # yaw, pitch, roll
         file_image = args.kittidir / "sequences" / args.kitti_seq / "image_2"
 
-    trajectory, est_euler = compute_sequence(
+    trajectory, est_euler, est_timestamp = compute_sequence(
         file_image,
         gt_t,
         gt_euler[0],
@@ -510,18 +544,33 @@ if __name__ == "__main__":
         args.database,
         args=args,
         depth_image_folder=file / "depth" if args.database == "tum" else None,
+        gt_timestamps=time_array
     )
+    
+    est_timestamp = np.array(est_timestamp).reshape(-1, 1)
+    
+    # save trajectory, est_euler to file
+    if args.save_trajectory:
+        save_trajectory(
+            trajectory,
+            est_euler,
+            est_timestamp,
+            args.maindir
+            / f"results/{args.database}_raw_trajectory.txt",
+        )
+    
+    
 
     if args.database == "tum":
         quaternions = R.from_euler("zyx", est_euler, degrees=True).as_quat()
         groundtruth = file / "groundtruth.txt"
         corect_trajectory(
-            groundtruth, quaternions, time_array, args.tum_seq, trajectory
+            groundtruth, quaternions, est_timestamp, args.tum_seq, trajectory
         )
         save_trajectory(
             trajectory,
             est_euler,
-            time_array,
+            est_timestamp,
             args.maindir / "results/generated_trajectory.txt",
         )
     if args.database == "kitti":
