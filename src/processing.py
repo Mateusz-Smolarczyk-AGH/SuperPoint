@@ -1,3 +1,4 @@
+from typing import Optional, Tuple
 import numpy as np
 import cv2
 import torch
@@ -11,15 +12,25 @@ import time
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 
 
-def crop_center(image, target_size):
+def crop_center(image, target_size) -> tuple[np.ndarray, tuple[int, int]]:
+    """
+    Crop the central region of an image to the specified target size.
+
+    Parameters:
+        image (np.ndarray): Input image as a NumPy array.
+        target_size (tuple[int, int]): Target size as (width, height) of the cropped region.
+
+    Returns:
+        tuple:
+            - cropped (np.ndarray): The cropped image.
+            - (x_start, y_start) (tuple[int, int]): Coordinates of the top-left corner of the crop in the original image.
+    """
     h, w = image.shape[:2]
     new_w, new_h = target_size
 
-    # Oblicz przesunięcia
     x_start = (w - new_w) // 2
     y_start = (h - new_h) // 2
 
-    # Wytnij wycinek
     cropped = image[y_start : y_start + new_h, x_start : x_start + new_w]
     return cropped, (x_start, y_start)
 
@@ -76,26 +87,63 @@ class Feature_detection:
         self.input_image = img.copy()
         self.input = img.mean(-1) / 255
 
-    def process_Superpoint(self) -> tuple:
+    def process_Superpoint(self) -> tuple[dict[str, torch.Tensor], float, float]:
         """
-        Process NN and short post processing.
+        Process the SuperPoint neural network and perform short post-processing.
+
+        Runs the forward pass through the model and extracts sparse keypoints 
+        from dense predictions via post-processing.
+
+        Returns:
+            tuple:
+                - predictions (dict[str, torch.Tensor]): Output from post-processing, 
+                typically including keypoints, scores, and descriptors.
+                - inference_time (float): Time in seconds for model inference.
+                - postprocessing_time (float): Time in seconds for post-processing.
         """
         start = time.perf_counter()
+
         input_tensor = torch.from_numpy(self.input[None, None]).float()
+
         scores, descriptors_dense = self.model(input_tensor)
         net = time.perf_counter()
+
+        scores = torch.nn.functional.softmax(scores, 1)[:, :-1]
+        softmax = time.perf_counter()
+
+        b, _, h, w = scores.shape
+        scores = scores.permute(0, 2, 3, 1).reshape(b, h, w, 8, 8)
+        scores = scores.permute(0, 1, 3, 2, 4).reshape(
+            b, h * 8, w * 8
+        )
+        dn = torch.norm(descriptors_dense, p=2, dim=1) # Compute the norm.
+        descriptors_dense = descriptors_dense.div(torch.unsqueeze(dn, 1)) # Divide by norm to normalize.
 
         predictions = self.post_processing_short(scores, descriptors_dense)
         post = time.perf_counter()
 
         return predictions, net - start, post - net
 
-    def post_processing_short(self, scores, descriptors_dense):
+    def post_processing_short(self, scores: torch.Tensor, descriptors_dense: torch.Tensor) -> dict[str, list[torch.Tensor]]:
         """
-        Realise post processing including:
-        ** discarding points near image border
-        ** converting keypoints
-        ** nms
+        Apply short post-processing to SuperPoint outputs.
+
+        This includes:
+            ** discarding keypoints near image borders
+            ** converting (i, j) to (x, y) coordinates
+            ** applying non-maximum suppression (NMS)
+            ** selecting top keypoints
+            ** sampling corresponding descriptors
+
+        Parameters:
+            scores (torch.Tensor): Heatmap tensor of keypoint scores, shape (B, H, W).
+            descriptors_dense (torch.Tensor): Dense descriptors from SuperPoint, shape (B, C, H/8, W/8).
+
+        Returns:
+            dict[str, list[torch.Tensor]]: Dictionary containing:
+                - "keypoints": list of (N_i, 2) tensors with 2D keypoint coordinates per image.
+                - "keypoint_scores": list of (N_i,) tensors with scores per keypoint.
+                - "descriptors": list of (N_i, D) tensors with corresponding descriptors.
         """
         conf = self.model.conf
         b = scores.shape[0]
@@ -151,21 +199,30 @@ class Feature_detection:
 class VisualOdometry:
     def __init__(
         self,
-        config,
-        image_size,
-        start_R,
-        start_t,
+        config: dict,
+        image_size: tuple[int, int],
+        start_R: np.ndarray,
+        start_t: np.ndarray,
         cam: PinholeCamera,
-        matching_type="bf",
-        database="tum",
-        superpoint_weights=None,
-        superglue_weights=None,
+        matching_type: str = "bf",
+        database: str = "tum",
+        superpoint_weights: str = None,
+        superglue_weights: str = None,
     ):
-        # self.keypoints = {"past": None,
-        #                   "present": None}
+        """
+        Visual odometry pipeline using either brute-force or SuperGlue feature matching.
 
-        # self.descriptors = {"past": None,
-        #                   "present": None}
+        Parameters:
+            config (dict): Configuration dictionary for parameters and thresholds.
+            image_size (tuple[int, int]): Input image size (width, height).
+            start_R (np.ndarray): Initial rotation matrix (3x3).
+            start_t (np.ndarray): Initial translation vector (3x1).
+            cam (PinholeCamera): Camera intrinsic and distortion model.
+            matching_type (str): Feature matching method ("bf" or "SuperGlue").
+            database (str): Dataset type (e.g., "tum").
+            superpoint_weights (str, optional): Path to SuperPoint weights.
+            superglue_weights (str, optional): Path to SuperGlue weights.
+        """
 
         self.args = config
         # depth
@@ -190,7 +247,8 @@ class VisualOdometry:
         )
 
         self.d = cam.d
-        self.trajectory = [self.start_t.flatten().tolist()]
+        starts =self.start_R.dot(self.t_total) + self.start_t
+        self.trajectory = [starts.flatten().tolist()]
         r = R.from_matrix(start_R)
         angles = r.as_euler("zyx", degrees=True)  # yaw, pitch, roll
         self.R_list = [angles]
@@ -207,9 +265,18 @@ class VisualOdometry:
             }
             self.matcher = superglue.SuperGlue(config).eval()
 
-    def match_descriptors_bf(self):
+    def match_descriptors_bf(self) -> tuple[list[np.ndarray], list[np.ndarray]]:
         """
-        Match the keypoints with the warped_keypoints with nearest neighbor search
+        Match descriptors between two sets of keypoints using brute-force matching.
+
+        Uses OpenCV's BFMatcher with L2 norm and crossCheck enabled to find 
+        one-to-one nearest neighbor matches between descriptors from 
+        `self.past_predictions` and `self.present_predictions`.
+
+        Returns:
+            tuple:
+                - m_kp1 (list[np.ndarray]): List of matched keypoints from the past frame.
+                - m_kp2 (list[np.ndarray]): List of corresponding matched keypoints from the present frame.
         """
         # FLANN_INDEX_KDTREE = 1
         # index_params = dict(algorithm = FLANN_INDEX_KDTREE, trees = 5)
@@ -236,7 +303,11 @@ class VisualOdometry:
 
         return m_kp1, m_kp2
 
-    def superglue_match(self):
+    def superglue_match(self) -> dict[str, torch.Tensor]:
+        """
+        Match the keypoints with the warped_keypoints with SupreGlue NN.
+        """
+
         # Preprocess the data
         keys = ["keypoints", "keypoint_scores", "descriptors"]
         last_data = {k + "0": self.past_predictions["raw"][k] for k in keys}
@@ -254,7 +325,23 @@ class VisualOdometry:
 
         return {**data, **pred}
 
-    def compute_homography(self, matched_kp1, matched_kp2):
+    def compute_homography(
+        self,
+        matched_kp1: list[cv2.KeyPoint] | np.ndarray,
+        matched_kp2: list[cv2.KeyPoint] | np.ndarray
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """
+        Estimate homography matrix from matched keypoints using RANSAC.
+
+        Parameters:
+            matched_kp1 (list[cv2.KeyPoint] | np.ndarray): Matched keypoints from the first image.
+            matched_kp2 (list[cv2.KeyPoint] | np.ndarray): Corresponding matched keypoints from the second image.
+
+        Returns:
+            tuple:
+                - H (np.ndarray): Estimated 3x3 homography matrix.
+                - inliers (np.ndarray): Binary mask of inliers (1) and outliers (0) determined by RANSAC.
+        """
         if isinstance(matched_kp1[0], cv2.KeyPoint):
             matched_pts1 = cv2.KeyPoint_convert(matched_kp1)
             matched_pts2 = cv2.KeyPoint_convert(matched_kp2)
@@ -268,18 +355,23 @@ class VisualOdometry:
         return H, inliers
 
     def show_arrows(
-        self, points_from, points_to, color=(0, 255, 0), thickness=1, tipLength=0.2
-    ):
+        self,
+        points_from: np.ndarray,
+        points_to: np.ndarray,
+        color: tuple = (0, 255, 0),
+        thickness: int = 1,
+        tipLength: float = 0.2
+    ) -> None:
         """
-        Rysuje strzałki od punktów 'points_from' do 'points_to' na obrazie.
+        Draws arrows from 'points_from' to 'points_to' on the image.
 
         Parameters:
-            image (np.ndarray): Obraz wejściowy (modyfikowany w miejscu).
-            points_from (np.ndarray): Punkty początkowe, shape (N, 2)
-            points_to (np.ndarray): Punkty końcowe, shape (N, 2)
-            color (tuple): Kolor strzałek w BGR.
-            thickness (int): Grubość linii.
-            tipLength (float): Długość grotu strzałki (0–1).
+            image (np.ndarray): Input image (modified in place).
+            points_from (np.ndarray): Starting points, shape (N, 2).
+            points_to (np.ndarray): Ending points, shape (N, 2).
+            color (tuple): Arrow color in BGR format.
+            thickness (int): Line thickness.
+            tipLength (float): Length of the arrow tip (range 0–1).
         """
         for pt1, pt2 in zip(points_from, points_to):
             pt1 = tuple(map(int, pt1))
@@ -297,7 +389,40 @@ class VisualOdometry:
                 tipLength=tipLength,
             )
 
-    def pose_estimation(self, points1, points2, abs_scale):
+    def pose_estimation(
+        self,
+        points1: np.ndarray,
+        points2: np.ndarray,
+        abs_scale: float
+    ) -> int:
+        """
+        Estimates relative pose between two sets of keypoints.
+
+        Parameters:
+            points1 (np.ndarray): Keypoints from previous frame, shape (N, 2).
+            points2 (np.ndarray): Keypoints from current frame, shape (N, 2).
+            abs_scale (float): Absolute scale for translation (used in RGB VO).
+
+        Returns:
+            int: 0 if pose update successful, 1 if rotation change too large.
+        """
+        E, mask = cv2.findEssentialMat(
+            points2,
+            points1,
+            focal=self.focal,
+            pp=self.pp,
+            method=cv2.RANSAC,
+            prob=0.999,
+            threshold=1.0,
+        )
+        # best_num_inliers = 0
+        # for _E in np.split(E, len(E) / 3):
+        #     n, R_temp, t_temp, _ = cv2.recoverPose(
+        #         _E, points2, points1, focal=self.focal, pp=self.pp, mask=mask)
+        #     if n > best_num_inliers:
+        #         best_num_inliers = n
+        #         R_diff, t = R_temp, t_temp
+        #         # ret = (R, t[:, 0], mask.ravel() > 0)
 
         if self.args.vo_type == "rgb":
             E, mask = cv2.findEssentialMat(
@@ -326,11 +451,10 @@ class VisualOdometry:
             )
             R_3d, _ = cv2.Rodrigues(rvec)
 
-            # Dane z solvePnPRansac (R_cam, t_cam): świat → kamera
+            # Camera to world transformation
             R_rel = R_3d
             t_rel = tvec.reshape(3, 1)
 
-            # Odwrócenie transformacji: kamera → świat
             R_rel_inv = R_rel.T
             t_rel_inv = -R_rel_inv @ t_rel
 
@@ -350,13 +474,32 @@ class VisualOdometry:
             or translation_change < 10e-3
         ):
             return 1
-
+        
+        # Update global pose
         self.t_total = self.t_total + abs_scale * self.R_total.dot(t)
         self.R_total = self.R_total.dot(R_diff)
+
         return 0
 
-    def depth_estimation(self, kp1, kp2, factor=5000):
+    def depth_estimation(
+        self,
+        kp1: list[tuple[float, float]],
+        kp2: list[tuple[float, float]],
+        factor: float = 5000
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """
+        Estimates 2D-3D point correspondences for pose estimation using RGB-D data.
 
+        Parameters:
+            kp1 (list[tuple[float, float]]): Keypoints from the previous frame (with depth), shape (N, 2).
+            kp2 (list[tuple[float, float]]): Corresponding keypoints from the current frame, shape (N, 2).
+            factor (float): Depth scaling factor (e.g., 5000 for mm to meters conversion).
+
+        Returns:
+            tuple[np.ndarray, np.ndarray]:
+                - pts2d: 2D points in the current frame, shape (M, 1, 2)
+                - pts3d: Corresponding 3D points in the previous frame, shape (M, 1, 3)
+        """
         pts2d = []
         pts3d = []
         for p1, p2 in zip(kp1, kp2):
@@ -377,7 +520,14 @@ class VisualOdometry:
 
         return pts2d, pts3d
 
-    def compute_first_image(self, image, depth_image=None):
+    def compute_first_image(self, image: np.ndarray, depth_image: np.ndarray | None = None) -> None:
+        """
+        Initializes the visual odometry pipeline using the first input image (and optional depth image).
+
+        Parameters:
+            image (np.ndarray): The first RGB image frame.
+            depth_image (np.ndarray | None): The corresponding depth map (used for RGB-D odometry).
+        """        
         self.feature_detection.get_input(image)
         self.past_predictions["raw"], _, _ = self.feature_detection.process_Superpoint()
         self.past_predictions["descriptors"] = (
@@ -400,7 +550,38 @@ class VisualOdometry:
         # sift = cv2.SIFT_create()
         # self.past_predictions['keypoints'], self.past_predictions['descriptors'] = sift.detectAndCompute(gray,None)
 
-    def compute_pipeline(self, image, pos_cur=None, pos_prev=None, depth_image=None):
+    def compute_pipeline(
+        self,
+        image: np.ndarray,
+        pos_cur: Optional[np.ndarray] = None,
+        pos_prev: Optional[np.ndarray] = None,
+        depth_image: Optional[np.ndarray] = None,
+    ) -> Tuple[int, Tuple[float, float, float, float, float, int]]:
+        """
+        Runs the full visual odometry pipeline for a single frame.
+
+        This method processes the input image through SuperPoint for keypoint detection,
+        matches keypoints using either brute-force or SuperGlue, estimates camera pose,
+        updates the trajectory and orientation, and optionally draws motion arrows.
+
+        Args:
+            image (np.ndarray): Current RGB image frame.
+            pos_cur (np.ndarray, optional): Current ground truth position (used to compute scale). Defaults to None.
+            pos_prev (np.ndarray, optional): Previous ground truth position. Defaults to None.
+            depth_image (np.ndarray, optional): Depth image corresponding to the RGB frame (used in RGB-D mode). Defaults to None.
+
+        Returns:
+            Tuple[int, Tuple[float, float, float, float, float, int]]:
+                - result (int): 0 if pose estimation succeeded, 1 if discarded due to large rotation.
+                - timings (Tuple): Durations of each stage in seconds:
+                    * preprocessing_time (float)
+                    * superpoint_time (float)
+                    * postprocessing_time (float)
+                    * matching_time (float)
+                    * pose_estimation_time (float)
+                    * num_keypoints (int): Number of keypoints detected in current frame.
+        """
+
         start = time.perf_counter()
         # preprocessing
         self.feature_detection.get_input(image)
@@ -408,7 +589,7 @@ class VisualOdometry:
         # superPoint
 
         self.present_predictions["raw"], net, post = (
-            self.feature_detection.process_Superpoint()
+           self.feature_detection.process_Superpoint()
         )
         # net = 0
         # post = 0
@@ -484,8 +665,8 @@ class VisualOdometry:
             abs_scale = np.linalg.norm(pos_cur - pos_prev)
             # print("Scale: ", abs_scale)
 
-        # abs_scale = np.sqrt((pos_cur[0] - pos_prev[0])*(pos_cur[0] - pos_prev[0]) + (pos_cur[1] - pos_prev[1])*(pos_cur[1] - pos_prev[1]) + (pos_cur[1] - pos_prev[1])*(pos_cur[1] - pos_prev[1]))
         result = self.pose_estimation(pts1, pts2, abs_scale)
+
         r_global = self.start_R.dot(self.R_total)
         r = R.from_matrix(r_global)
 
@@ -501,6 +682,7 @@ class VisualOdometry:
 
         trac = self.start_R.dot(self.t_total) + self.start_t
         self.trajectory.append(trac.flatten().tolist())
+        position_time = time.perf_counter()
         self.show_arrows(pts1, pts2)
 
-        return result, (pre - start, net, post, end - match, len(pts1))
+        return result, (pre - start, net, post, end - match, position_time - end, len(self.present_predictions["keypoints"]))
