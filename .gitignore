@@ -3,4 +3,4 @@ outputs_batch_**
 **.xmodel
 **.pyc
 kria_evaluation/data_pt/**
-pSuperGluePretrainedNetwork/assets/**/*.{jpg,jpeg,png,bmp,tiff}
+SuperGluePretrainedNetwork/**/*.{jpg,jpeg,png,bmp,tiff}
